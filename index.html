@@ -79,7 +79,7 @@
 
 /* Visor de correos GESMAIL: modo lectura */
 #emailReaderHost .reader-shade{position:fixed;inset:0;z-index:4000;background:rgba(15,31,52,.64);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px}
-#emailReaderHost .reader-window{display:flex;flex-direction:column;background:#fff;width:min(1120px,100%);height:min(900px,94vh);min-height:320px;border-radius:16px;box-shadow:0 30px 90px #05152a66;overflow:hidden;color:#213650}
+#emailReaderHost .reader-window{display:flex;flex-direction:column;background:#fff;width:min(1240px,100%);height:min(900px,94vh);min-height:320px;border-radius:16px;box-shadow:0 30px 90px #05152a66;overflow:hidden;color:#213650}
 #emailReaderHost .reader-top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:15px 22px;border-bottom:1px solid #e5ebf3;background:#f8faff}
 #emailReaderHost .reader-brand{font-size:11px;letter-spacing:1.25px;font-weight:850;color:#306bd2}
 #emailReaderHost .reader-top-actions{display:flex;gap:10px;align-items:center}
@@ -281,25 +281,30 @@ function findThreadByReply(mail){
 }
 
 
+
 function upgradeEmailFormat(targetId,mail){
   if(!mail.body_html)return false;
   const row=cards.find(c=>c.id===targetId);
   if(!row)return false;
   let upgraded=false;
   const thread=getThread(row).map(entry=>{
-    const matched=duplicateReason(mail,{...entry,thread:[]});
-    if(!matched||entry.body_html)return entry;
+    if(!duplicateReason(mail,{...entry,thread:[]}))return entry;
+    const currentImages=entry.inline_images||{};
+    const incomingImages=mail.inline_images||{};
+    const images={...currentImages,...incomingImages};
+    const hasNewImages=Object.keys(incomingImages).some(cid=>currentImages[cid]!==incomingImages[cid]);
+    const betterHtml=!entry.body_html||mail.body_html.length>entry.body_html.length;
+    if(!hasNewImages&&!betterHtml)return entry;
     upgraded=true;
-    return {...entry,body_html:mail.body_html,inline_images:mail.inline_images||{},
-      body_preview:mail.body_preview||entry.body_preview};
+    return {...entry,body_html:betterHtml?mail.body_html:entry.body_html,
+      inline_images:images,body_preview:mail.body_preview||entry.body_preview};
   });
   if(!upgraded)return false;
   const next=cards.map(c=>c.id===targetId?{...c,thread,updated_at:createdAt()}:c);
   if(!persist(next))return false;
-  toast('Formato del correo actualizado: ya puedes leerlo con su firma e imágenes.','success');
+  toast('Firma e imágenes del correo actualizadas sin duplicar la RFQ.','success');
   return true;
 }
-
 function appendMailToThread(id,mail){
   const row=cards.find(c=>c.id===id);
   if(!row)return false;
@@ -826,19 +831,22 @@ function htmlAsText(html){
   doc.querySelectorAll('br,p,div,li,tr,h1,h2,h3,h4').forEach(el=>el.append('\n'));
   return (doc.body?.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
 }
+
 function inlineEmailImages(attachments,html){
-  const map={};let remaining=500*1024;
+  const map={};let remaining=1200*1024;
+  const body=String(html||'').toLowerCase();
   for(const att of attachments||[]){
-    const id=String(att.contentId||'').replace(/^<|>$/g,'').trim().toLowerCase();
+    const raw=String(att.contentId||'').replace(/^<|>$/g,'').trim();
+    const id=raw.toLowerCase();
     const mime=String(att.mimeType||'').toLowerCase();
     const encoded=typeof att.content==='string'?att.content:'';
     if(!id||!/^image\/(png|jpeg|gif|webp)$/.test(mime)||!encoded)continue;
-    const estimatedSize=Math.floor(encoded.length*3/4);
-    if(estimatedSize>300*1024||estimatedSize>remaining)continue;
-    const lower=html.toLowerCase();
-    if(!lower.includes('cid:'+id)&&!lower.includes('cid:'+encodeURIComponent(id).toLowerCase()))continue;
+    const size=Math.floor(encoded.length*3/4);
+    if(size>700*1024||size>remaining)continue;
+    const encodedId=encodeURIComponent(id).toLowerCase();
+    if(!body.includes('cid:'+id)&&!body.includes('cid:'+encodedId))continue;
     if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))continue;
-    remaining-=estimatedSize;
+    remaining-=size;
     map[id]='data:'+mime+';base64,'+encoded;
   }
   return map;
