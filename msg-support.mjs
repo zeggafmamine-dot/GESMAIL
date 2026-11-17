@@ -42,34 +42,71 @@ const utf8Base64 = text => bytesBase64(new TextEncoder().encode(String(text ?? '
 function encodedMimeLines(text) {
   return String(text).match(/.{1,76}/g)?.join('\r\n') || '';
 }
-function inlineMsgImages(info, reader, html) {
-  const list = Array.isArray(info?.attachments) ? info.attachments : [];
-  const images = [];
-  let remaining = 500 * 1024;
-  for (let index = 0; index < list.length && images.length < 15; index++) {
-    const entry = list[index];
-    const cid = cleanHeader(entry.pidContentId || entry.contentId || '');
-    const mime = cleanHeader(entry.mimeType || '').toLowerCase();
-    if (!cid || !/^image\/(png|jpeg|gif|webp)$/.test(mime)) continue;
-    const normalizedCid = cid.replace(/^<|>$/g, '');
-    if (!html.toLowerCase().includes('cid:' + normalizedCid.toLowerCase()) &&
-        !html.toLowerCase().includes('cid:' + encodeURIComponent(normalizedCid).toLowerCase())) continue;
-    if ((entry.contentLength || 0) > remaining) continue;
+
+function normalizeImageRef(value) {
+  let valueText=String(value||'').trim().replace(/^['"]|['"]$/g,'').replace(/^cid:/i,'').replace(/^<|>$/g,'');
+  try {valueText=decodeURIComponent(valueText)} catch { /* conservar valor */ }
+  return valueText.replace(/\\/g,'/').replace(/^\.\//,'').trim().toLowerCase();
+}
+function sniffImageMime(bytes) {
+  if(bytes.length>=8&&bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71)return 'image/png';
+  if(bytes.length>=3&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255)return 'image/jpeg';
+  if(bytes.length>=6&&bytes[0]===71&&bytes[1]===73&&bytes[2]===70&&bytes[3]===56)return 'image/gif';
+  if(bytes.length>=12&&bytes[0]===82&&bytes[1]===73&&bytes[2]===70&&bytes[3]===70
+    &&bytes[8]===87&&bytes[9]===69&&bytes[10]===66&&bytes[11]===80)return 'image/webp';
+  return '';
+}
+function inlineMsgImages(info,reader,html) {
+  const list=Array.isArray(info?.attachments)?info.attachments:[];
+  let resultHtml=String(html||'');
+  const images=[];
+  let remaining=1200*1024;
+  const refs=[...resultHtml.matchAll(/(?:\b(?:src|background)\s*=\s*["']?([^"'\s>]+))|(?:url\(\s*["']?([^"')\s]+))/gi)]
+    .map(match=>match[1]||match[2]).filter(Boolean);
+  const seen=new Set();
+  for(let index=0;index<list.length&&images.length<25;index++){
+    const entry=list[index];
+    const aliases=[entry.pidContentId,entry.contentId,entry.attachContentLocation,entry.fileName,entry.fileNameShort]
+      .filter(Boolean).map(normalizeImageRef);
+    if(!aliases.length)continue;
+    const matched=refs.find(ref=>{
+      const normalized=normalizeImageRef(ref);
+      const basename=normalized.split('/').pop();
+      return aliases.some(alias=>normalized===alias||basename===alias||
+        ((normalized.startsWith(alias+'@')||basename.startsWith(alias+'@'))&&alias.includes('.')));
+    });
+    if(!matched||entry.contentLength>remaining)continue;
     let data;
-    try { data = reader.getAttachment(entry); } catch { /* otros lectores esperan un índice */ }
-    if (!data?.content) {
-      try { data = reader.getAttachment(index); } catch { /* imagen no disponible */ }
+    try {data=reader.getAttachment(entry)}catch {
+      try {data=reader.getAttachment(index)}catch {continue}
     }
-    const content = data?.content;
-    const bytes = content instanceof Uint8Array ? content :
-      content instanceof ArrayBuffer ? new Uint8Array(content) :
-      Array.isArray(content) ? new Uint8Array(content) : null;
-    if (!bytes?.length || bytes.length > 300 * 1024 || bytes.length > remaining) continue;
-    remaining -= bytes.length;
-    images.push({cid:normalizedCid,mime,base64:bytesBase64(bytes),
-      filename:cleanHeader(entry.fileName || entry.fileNameShort || 'imagen').replace(/[";\\]/g,'_')});
+    const content=data?.content;
+    const bytes=content instanceof Uint8Array?content:
+      content instanceof ArrayBuffer?new Uint8Array(content):
+      Array.isArray(content)?new Uint8Array(content):null;
+    if(!bytes?.length||bytes.length>700*1024||bytes.length>remaining)continue;
+    const mime=sniffImageMime(bytes);
+    if(!mime)continue;
+    const originalCid=normalizeImageRef(entry.pidContentId||entry.contentId);
+    const matchedCid=/^cid:/i.test(matched)?normalizeImageRef(matched):'';
+    let cid=originalCid||matchedCid||('gesmail-image-'+index+'@inline');
+    if(!/^[^\s<>"]{1,200}$/.test(cid))cid='gesmail-image-'+index+'@inline';
+    if(seen.has(cid))continue;
+    seen.add(cid);
+    if(normalizeImageRef(matched)!==cid){
+      resultHtml=resultHtml.replace(/((?:src|background)\s*=\s*["']?)([^"'\s>]+)/gi,
+        (full,prefix,value)=>normalizeImageRef(value)===normalizeImageRef(matched)?prefix+'cid:'+cid:full);
+      resultHtml=resultHtml.replace(/(url\(\s*["']?)([^"')\s]+)/gi,
+        (full,prefix,value)=>normalizeImageRef(value)===normalizeImageRef(matched)?prefix+'cid:'+cid:full);
+    }else if(!/^cid:/i.test(matched)){
+      resultHtml=resultHtml.replace(/((?:src|background)\s*=\s*["']?)([^"'\s>]+)/gi,
+        (full,prefix,value)=>normalizeImageRef(value)===cid?prefix+'cid:'+cid:full);
+    }
+    remaining-=bytes.length;
+    images.push({cid,mime,base64:bytesBase64(bytes),
+      filename:cleanHeader(entry.fileName||entry.fileNameShort||('imagen-'+index+'.png')).replace(/[";\\]/g,'_')});
   }
-  return images;
+  return {images,html:resultHtml};
 }
 export function messageAsEml(info, reader) {
   const headers = String(info?.headers || '');
@@ -94,6 +131,7 @@ export function messageAsEml(info, reader) {
   try { if (typeof reader?.getHtmlBody === 'function') html = String(reader.getHtmlBody() || ''); }
   catch { /* algunos MSG contienen solamente texto o RTF */ }
   if (!html && typeof info?.bodyHtml === 'string') html = info.bodyHtml;
+  if (!html && info?.bodyHtml instanceof Uint8Array) html = new TextDecoder('utf-8').decode(info.bodyHtml);
   let body = String(info?.body || '').trim();
   if (!body && html) body = htmlToPlain(html);
   if (!body && typeof reader?.getRtfBody === 'function') {
@@ -118,7 +156,9 @@ export function messageAsEml(info, reader) {
   const token = Math.random().toString(36).slice(2);
   const outer = 'gesmail_related_' + token;
   const alternative = 'gesmail_alternative_' + token;
-  const images = inlineMsgImages(info,reader,html);
+  const embedded=inlineMsgImages(info,reader,html);
+  html=embedded.html;
+  const images=embedded.images;
   lines.push('Content-Type: multipart/related; boundary="' + outer + '"','',
     '--' + outer,
     'Content-Type: multipart/alternative; boundary="' + alternative + '"','',
