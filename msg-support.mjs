@@ -30,6 +30,47 @@ function htmlToPlain(html) {
   doc.querySelectorAll('script,style,noscript').forEach(el => el.remove());
   return (doc.body?.textContent || '').trim();
 }
+// Convierte texto y firmas HTML de Outlook a MIME sin subir archivos.
+function bytesBase64(bytes) {
+  let binary = '';
+  for (let pos = 0; pos < bytes.length; pos += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(pos, pos + 8192));
+  }
+  return btoa(binary);
+}
+const utf8Base64 = text => bytesBase64(new TextEncoder().encode(String(text ?? '')));
+function encodedMimeLines(text) {
+  return String(text).match(/.{1,76}/g)?.join('\r\n') || '';
+}
+function inlineMsgImages(info, reader, html) {
+  const list = Array.isArray(info?.attachments) ? info.attachments : [];
+  const images = [];
+  let remaining = 500 * 1024;
+  for (let index = 0; index < list.length && images.length < 15; index++) {
+    const entry = list[index];
+    const cid = cleanHeader(entry.pidContentId || entry.contentId || '');
+    const mime = cleanHeader(entry.mimeType || '').toLowerCase();
+    if (!cid || !/^image\/(png|jpeg|gif|webp)$/.test(mime)) continue;
+    const normalizedCid = cid.replace(/^<|>$/g, '');
+    if (!html.toLowerCase().includes('cid:' + normalizedCid.toLowerCase()) &&
+        !html.toLowerCase().includes('cid:' + encodeURIComponent(normalizedCid).toLowerCase())) continue;
+    if ((entry.contentLength || 0) > remaining) continue;
+    let data;
+    try { data = reader.getAttachment(entry); } catch { /* otros lectores esperan un índice */ }
+    if (!data?.content) {
+      try { data = reader.getAttachment(index); } catch { /* imagen no disponible */ }
+    }
+    const content = data?.content;
+    const bytes = content instanceof Uint8Array ? content :
+      content instanceof ArrayBuffer ? new Uint8Array(content) :
+      Array.isArray(content) ? new Uint8Array(content) : null;
+    if (!bytes?.length || bytes.length > 300 * 1024 || bytes.length > remaining) continue;
+    remaining -= bytes.length;
+    images.push({cid:normalizedCid,mime,base64:bytesBase64(bytes),
+      filename:cleanHeader(entry.fileName || entry.fileNameShort || 'imagen').replace(/[";\\]/g,'_')});
+  }
+  return images;
+}
 export function messageAsEml(info, reader) {
   const headers = String(info?.headers || '');
   const subject = cleanHeader(info?.subject || info?.normalizedSubject || fieldFromHeaders(headers, 'Subject'));
@@ -38,13 +79,10 @@ export function messageAsEml(info, reader) {
   const sender = (fromEmail && /^[^\s<>@]+@[^\s<>@]+$/.test(fromEmail))
     ? (fromName ? fromName.replace(/[<>]/g, '') + ' ' : '') + '<' + fromEmail + '>'
     : (fromName || fromEmail || fieldFromHeaders(headers, 'From'));
-  // Preferir cabeceras RFC completas; en algunos MSG de Outlook el campo CC
-  // está disponible únicamente como displayCc o lista de destinatarios.
   const recipientList = Array.isArray(info?.recipients) ? info.recipients : [];
   const recipientText = type => recipientList
     .filter(r => String(r.recipType || r.recipientType || r.type || '').toLowerCase() === type)
-    .map(r => cleanHeader(r.smtpAddress || r.email || r.name || ''))
-    .filter(Boolean).join(', ');
+    .map(r => cleanHeader(r.smtpAddress || r.email || r.name || '')).filter(Boolean).join(', ');
   const to = cleanHeader(fieldFromHeaders(headers, 'To') || info?.displayTo || recipientText('to'));
   const cc = cleanHeader(fieldFromHeaders(headers, 'Cc') || info?.displayCc || recipientText('cc'));
   const inReplyTo = cleanHeader(fieldFromHeaders(headers, 'In-Reply-To') || info?.inReplyTo || '');
@@ -52,12 +90,14 @@ export function messageAsEml(info, reader) {
   const msgId = cleanHeader(info?.internetMessageId || fieldFromHeaders(headers, 'Message-ID'));
   const time = info?.clientSubmitTime || info?.deliverTime || fieldFromHeaders(headers, 'Date');
   const date = time ? new Date(time) : null;
+  let html = '';
+  try { if (typeof reader?.getHtmlBody === 'function') html = String(reader.getHtmlBody() || ''); }
+  catch { /* algunos MSG contienen solamente texto o RTF */ }
+  if (!html && typeof info?.bodyHtml === 'string') html = info.bodyHtml;
   let body = String(info?.body || '').trim();
-  if (!body && typeof reader?.getHtmlBody === 'function') {
-    try { body = htmlToPlain(reader.getHtmlBody()); } catch { /* try RTF */ }
-  }
+  if (!body && html) body = htmlToPlain(html);
   if (!body && typeof reader?.getRtfBody === 'function') {
-    try { body = rtfToPlain(reader.getRtfBody()); } catch { /* no RTF */ }
+    try { body = rtfToPlain(reader.getRtfBody()); } catch { /* sin RTF */ }
   }
   if (!subject && !sender) throw new Error('No se ha podido leer el asunto ni el remitente del archivo MSG.');
   const lines = [
@@ -69,11 +109,36 @@ export function messageAsEml(info, reader) {
     ...(references ? ['References: ' + references] : []),
     ...(msgId ? ['Message-ID: <' + msgId.replace(/^<|>$/g, '') + '>'] : []),
     ...(date && !Number.isNaN(date.getTime()) ? ['Date: ' + date.toUTCString()] : []),
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: 8bit',
-    '', body
+    'MIME-Version: 1.0'
   ];
+  if (!html) {
+    lines.push('Content-Type: text/plain; charset=utf-8','Content-Transfer-Encoding: base64','',encodedMimeLines(utf8Base64(body)));
+    return lines.join('\r\n');
+  }
+  const token = Math.random().toString(36).slice(2);
+  const outer = 'gesmail_related_' + token;
+  const alternative = 'gesmail_alternative_' + token;
+  const images = inlineMsgImages(info,reader,html);
+  lines.push('Content-Type: multipart/related; boundary="' + outer + '"','',
+    '--' + outer,
+    'Content-Type: multipart/alternative; boundary="' + alternative + '"','',
+    '--' + alternative,
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64','',
+    encodedMimeLines(utf8Base64(body)),
+    '--' + alternative,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64','',
+    encodedMimeLines(utf8Base64(html)),
+    '--' + alternative + '--');
+  for (const image of images) {
+    lines.push('--' + outer,'Content-Type: ' + image.mime + '; name="' + image.filename + '"',
+      'Content-Disposition: inline; filename="' + image.filename + '"',
+      'Content-ID: <' + image.cid + '>',
+      'Content-Transfer-Encoding: base64','',
+      encodedMimeLines(image.base64));
+  }
+  lines.push('--' + outer + '--','');
   return lines.join('\r\n');
 }
 async function parseMsg(file) {
