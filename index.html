@@ -59,6 +59,24 @@
 .score-thread-button{margin-top:10px!important;padding:7px 10px!important;white-space:normal!important;text-align:left;font-size:11px!important}
 @media(max-width:640px){.rfq-summary{grid-template-columns:1fr}.rfq-summary-field:first-child{grid-column:1}.thread-email-details{padding-left:13px}.thread-num{width:23px;height:23px}.dialog:has(.rfq-summary){width:min(100%,780px)}}
 
+/* Confirmaciones centradas con el mismo estilo visual que los avisos */
+#confirmHost .gesmail-confirm-overlay{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:18px;background:rgba(18,35,57,.48);backdrop-filter:blur(3px)}
+#confirmHost .gesmail-confirm-panel{width:min(100%,490px);max-height:min(90vh,680px);overflow-y:auto;background:#fff;border:1px solid #e5ebf3;border-radius:18px;box-shadow:0 22px 65px rgba(18,35,57,.26);padding:25px;color:#1d2e45;animation:toast-pop .19s ease-out both}
+#confirmHost .gesmail-confirm-head{display:flex;align-items:center;gap:15px;margin-bottom:17px}
+#confirmHost .gesmail-confirm-symbol{width:46px;height:46px;flex:none;display:grid;place-items:center;border-radius:13px;background:#fde9ed;color:#c63e52;font-weight:800;font-size:23px}
+#confirmHost .gesmail-confirm-title{font-size:18px;font-weight:800;line-height:1.3;margin:0;color:#1d2e45}
+#confirmHost .gesmail-confirm-subject{padding:13px 15px;margin:0 0 16px;background:#f5f8fd;border:1px solid #e4ebf5;border-radius:10px;font-weight:750;font-size:13px;line-height:1.5;overflow-wrap:anywhere;color:#1d3553}
+#confirmHost .gesmail-confirm-description{color:#526477;font-size:13px;line-height:1.65;margin:0 0 12px}
+#confirmHost .gesmail-confirm-note{color:#b23649;font-size:12px;font-weight:700;line-height:1.6;margin:0}
+#confirmHost .gesmail-confirm-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:24px}
+#confirmHost .gesmail-confirm-actions button{font-size:12px;font-weight:750;border-radius:10px;padding:11px 17px;border:1px solid #d9e2ef;cursor:pointer}
+#confirmHost .gesmail-confirm-cancel{background:#fff;color:#526477}
+#confirmHost .gesmail-confirm-cancel:hover{background:#f4f7fb}
+#confirmHost .gesmail-confirm-accept{background:#c63e52;border-color:#c63e52!important;color:#fff}
+#confirmHost .gesmail-confirm-accept:hover{background:#a92e41}
+#confirmHost .gesmail-confirm-actions button:focus-visible{outline:3px solid #9dc0ff;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){#confirmHost .gesmail-confirm-panel{animation:none}}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -443,17 +461,72 @@ function openCard(id){
     if(persist(next)){closeModal();toast('RFQ actualizada','success')}
   };
 }
-function deleteCard(id){
+function confirmAction({title,subject='',description='',note='',confirmLabel='Confirmar'}){
+  return new Promise(resolve=>{
+    const host=$('confirmHost');
+    // Impide superponer confirmaciones por un doble clic.
+    if(host.childElementCount){resolve(false);return;}
+    const previousFocus=document.activeElement;
+    const overlay=document.createElement('div');
+    overlay.className='gesmail-confirm-overlay';
+    overlay.innerHTML=`<div class="gesmail-confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="gesmail-confirm-title" aria-describedby="gesmail-confirm-description">
+      <div class="gesmail-confirm-head"><span class="gesmail-confirm-symbol" aria-hidden="true">!</span><h2 class="gesmail-confirm-title" id="gesmail-confirm-title"></h2></div>
+      <div class="gesmail-confirm-subject"></div>
+      <p class="gesmail-confirm-description" id="gesmail-confirm-description"></p>
+      <p class="gesmail-confirm-note"></p>
+      <div class="gesmail-confirm-actions"><button type="button" class="gesmail-confirm-cancel">Cancelar</button><button type="button" class="gesmail-confirm-accept"></button></div>
+    </div>`;
+    const panel=overlay.querySelector('.gesmail-confirm-panel');
+    panel.querySelector('.gesmail-confirm-title').textContent=title;
+    const subjectEl=panel.querySelector('.gesmail-confirm-subject');
+    subjectEl.textContent=subject;
+    subjectEl.hidden=!subject;
+    panel.querySelector('.gesmail-confirm-description').textContent=description;
+    const noteEl=panel.querySelector('.gesmail-confirm-note');
+    noteEl.textContent=note;
+    noteEl.hidden=!note;
+    const cancel=panel.querySelector('.gesmail-confirm-cancel');
+    const accept=panel.querySelector('.gesmail-confirm-accept');
+    accept.textContent=confirmLabel;
+    let settled=false;
+    function finish(confirmed){
+      if(settled)return;
+      settled=true;
+      document.removeEventListener('keydown',onKeyDown,true);
+      overlay.remove();
+      if(previousFocus&&previousFocus.isConnected&&typeof previousFocus.focus==='function')previousFocus.focus();
+      resolve(confirmed);
+    }
+    function onKeyDown(e){
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish(false);return;}
+      if(e.key==='Tab'){
+        const focusables=[cancel,accept];
+        const index=focusables.indexOf(document.activeElement);
+        if(e.shiftKey&&(index===0||index===-1)){e.preventDefault();accept.focus();}
+        else if(!e.shiftKey&&(index===1||index===-1)){e.preventDefault();cancel.focus();}
+      }
+    }
+    cancel.addEventListener('click',()=>finish(false));
+    accept.addEventListener('click',()=>finish(true));
+    overlay.addEventListener('mousedown',e=>{if(e.target===overlay)finish(false)});
+    host.append(overlay);
+    document.addEventListener('keydown',onKeyDown,true);
+    cancel.focus();
+  });
+}
+async function deleteCard(id){
   const row=cards.find(c=>c.id===id);
   if(!row)return toast('Este negocio ya no existe.','warning');
   const title=String(row.subject||'Sin asunto').slice(0,180);
   const messages=getThread(row).length;
-  const warning='¿Borrar definitivamente este negocio?\n\n'+
-    '«'+title+'»\n\n'+
-    'Se eliminará la RFQ junto con sus '+messages+' '+(messages===1?'correo asociado':'correos asociados')+
-    ', sus notas y su historial. Esta acción no se puede deshacer.\n\n'+
-    'Los demás negocios no se modificarán.';
-  if(!window.confirm(warning))return;
+  const confirmed=await confirmAction({
+    title:'¿Borrar definitivamente este negocio?',
+    subject:'«'+title+'»',
+    description:'Se eliminará la RFQ junto con sus '+messages+' '+(messages===1?'correo asociado':'correos asociados')+', sus notas y su historial. Los demás negocios no se modificarán.',
+    note:'Esta acción no se puede deshacer.',
+    confirmLabel:'Borrar negocio'
+  });
+  if(!confirmed)return;
   const remaining=cards.filter(c=>c.id!==id);
   if(remaining.length===cards.length)return toast('El negocio ya no existe.','warning');
   if(!persist(remaining))return;
@@ -612,7 +685,12 @@ function exportBackup(){download('rfq-equipo-demo-'+new Date().toISOString().sli
 async function importBackup(file){
   try{const parsed=JSON.parse(await file.text());if(parsed?.format!=='rfq-equipo-demo-v1'||!Array.isArray(parsed.cards))throw new Error('Formato de copia no reconocido.');
     const clean=parsed.cards.filter(c=>c&&c.id&&STAGES.includes(c.stage));
-    if(!confirm(`¿Reemplazar las ${cards.length} RFQ actuales por las ${clean.length} RFQ de la copia?`))return;
+    if(!await confirmAction({
+      title:'¿Restaurar copia de seguridad?',
+      description:`Se reemplazarán las ${cards.length} RFQ actuales por las ${clean.length} RFQ de la copia de seguridad.`,
+      note:'Los datos actuales que no estén en la copia se perderán.',
+      confirmLabel:'Restaurar copia'
+    }))return;
     if(persist(clean))toast('Copia de seguridad restaurada.','success');
   }catch(e){toast('No se pudo importar la copia: '+e.message,'error')}
 }
@@ -670,7 +748,17 @@ $('loadExamples').onclick=loadExamples;
 $('backupBtn').onclick=exportBackup;
 $('restoreBtn').onclick=()=>$('restoreInput').click();
 $('restoreInput').addEventListener('change',e=>{if(e.target.files[0])importBackup(e.target.files[0]);e.target.value=''});
-$('clearBtn').onclick=()=>{if(!cards.length)return toast('El tablero ya está vacío.');if(confirm(`¿Borrar las ${cards.length} RFQ de esta demo en este navegador?`)){persist([]);toast('Tablero restablecido.','success')}};
+$('clearBtn').onclick=async()=>{
+  if(!cards.length)return toast('El tablero ya está vacío.');
+  if(await confirmAction({
+    title:'¿Vaciar todo el tablero?',
+    description:`Se borrarán las ${cards.length} RFQ guardadas en este navegador.`,
+    note:'Esta acción no se puede deshacer.',
+    confirmLabel:'Borrar todas'
+  })){
+    if(persist([]))toast('Tablero restablecido.','success');
+  }
+};
 const drop=$('dropZone');
 drop.addEventListener('dragover',e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();drop.classList.add('dragover')}});
 drop.addEventListener('dragleave',()=>drop.classList.remove('dragover'));
@@ -718,5 +806,6 @@ render();
 </div>
 <div id="toastHost" aria-live="polite"></div>
 <div id="modalHost"></div>
+<div id="confirmHost"></div>
 <script type="module" src="./msg-support.mjs?v=rfq-thread-20261117-b"></script>
 </body></html>
