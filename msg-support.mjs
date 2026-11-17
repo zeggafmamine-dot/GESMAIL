@@ -165,6 +165,46 @@ function sendToOriginalImporter(files) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+/**
+ * Mantiene los avisos y las acciones existentes, pero los sitúa
+ * en el centro de la pantalla, también en móviles.
+ */
+function centerToastNotifications() {
+  if (document.getElementById('gesmailCenteredToasts')) return;
+  const style = document.createElement('style');
+  style.id = 'gesmailCenteredToasts';
+  style.textContent = `
+    #toastHost {
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: translate(-50%, -50%) !important;
+      width: min(92vw, 540px) !important;
+      max-width: calc(100vw - 24px) !important;
+      max-height: 80vh !important;
+      padding: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      align-items: stretch !important;
+      gap: 12px !important;
+      overflow-y: auto !important;
+      z-index: 2147483600 !important;
+      pointer-events: none !important;
+    }
+    #toastHost .toast {
+      box-sizing: border-box;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      pointer-events: auto !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export function enableMsgSupport() {
   const input = document.getElementById('mailInput');
   const dropZone = document.getElementById('dropZone');
@@ -255,6 +295,7 @@ export function enableMsgSupport() {
 }
 
 if (typeof document !== 'undefined') {
+  centerToastNotifications();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enableMsgSupport, { once: true });
   else enableMsgSupport();
 }
