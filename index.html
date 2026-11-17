@@ -214,10 +214,13 @@ function normalize(value) {
     .replace(/[^\p{L}\p{N}\s@.\-]/gu, ' ')
     .replace(/\s+/g, ' ').trim();
 }
+function hasReplyPrefix(subject){
+  return /^\s*(?:re(?:\[\d+\])?|fw|fwd|rv|aw|sv|tr|r[eé]p|respuesta|antwort)\s*[:：]\s*/i.test(String(subject||''));
+}
 function normalizeSubject(subject) {
-  let s = String(subject || '');
-  while (/^\s*(re|fw|fwd|rv|aw|sv|tr)\s*:\s*/i.test(s)) {
-    s = s.replace(/^\s*(re|fw|fwd|rv|aw|sv|tr)\s*:\s*/i, '');
+  let s=String(subject||'');
+  while(hasReplyPrefix(s)){
+    s=s.replace(/^\s*(?:re(?:\[\d+\])?|fw|fwd|rv|aw|sv|tr|r[eé]p|respuesta|antwort)\s*[:：]\s*/i,'');
   }
   return normalize(s);
 }
@@ -336,7 +339,15 @@ function threadMatchCandidates(mail, rows) {
       const legacy=subject>=40?similarity(mail,current):0;
       // Emails corporativos comunes pueden coincidir en casos independientes.
       // Un destinatario coincidente por sí solo no es una prueba.
+      const replyPrefix=hasReplyPrefix(mail.subject||'');
+      const generic=/^(rfq|request for quotation|quotation|quote|consulta|cotizacion|cotización|oferta|offer|pedido|pedido de oferta|information)$/i.test(incomingSubject);
+      const subjectIsSpecific=incomingSubject.length>=12&&incomingSubject.split(/\s+/).length>=2&&!generic;
+      // Si Outlook pierde destinatarios/CC al convertir MSG, no perder una respuesta:
+      // ante un asunto específico idéntico, ofrecer revisión humana, nunca enlazar solo.
       const related=explicit ||
+        (subject>=96&&subjectIsSpecific&&(replyPrefix||overlap.length||senderLink))||
+        (subject>=99&&subjectIsSpecific&&incomingSubject.length>=17)||
+        (subject>=82&&subjectIsSpecific&&replyPrefix&&senderLink)||
         (subject>=91&&incomingSubject.length>=7&&(overlap.length||senderLink||content>=38))||
         (subject>=68&&overlap.length>0&&senderLink&&content>=25)||
         (subject>=55&&content>=78&&overlap.length>0)||
@@ -344,14 +355,16 @@ function threadMatchCandidates(mail, rows) {
       if(!related)continue;
       const reasons=[];
       if(explicit)reasons.push('Referencias de respuesta del correo');
+      if(replyPrefix)reasons.push('Es una respuesta o reenvío (RE:/FW:)');
       if(subject>=91)reasons.push('Mismo asunto (sin RE:/FW:)');
       else if(subject>=68)reasons.push('Asuntos muy parecidos');
       if(senderLink)reasons.push('Remitente relacionado con los destinatarios');
       else if(overlap.length)reasons.push('Dirección de correo coincidente');
       if(content>=48)reasons.push('Contenido de los mensajes parecido');
-      const score=explicit?100:Math.min(96,Math.round(
-        subject*.58+(senderLink?25:overlap.length?16:0)+content*.16+
-        (legacy>=76?6:0)));
+      const score=explicit?100:Math.min(96,Math.max(
+        subject>=96&&subjectIsSpecific&&replyPrefix?84:0,
+        Math.round(subject*.58+(senderLink?25:overlap.length?16:0)+content*.16+
+          (legacy>=76?6:0))));
       const candidate={row,score,reasons,anchor:current,anchorIndex:i,explicit};
       if(!best||candidate.score>best.score||
         (candidate.score===best.score&&candidate.explicit&&!best.explicit))best=candidate;
@@ -1621,7 +1634,10 @@ async function processQueue(){
   isBusy=true;
   try{
     while(queue.length){
-      const file=queue.shift();let mail;
+      const item=queue.shift();
+      const file=item?.file||item;
+      const preferredId=item?.targetId||null;
+      let mail;
       try{mail=await parseEML(file)}
       catch(e){toast(`${file.name}: ${e.message}`,'error');continue}
       const result=allMatches(mail,cards.filter(c=>c.email_fingerprint||c.message_id||c.raw_sha256||getThread(c).length));
@@ -1630,13 +1646,32 @@ async function processQueue(){
         toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');
         continue;
       }
+      const preferred=preferredId&&cards.find(c=>c.id===preferredId);
+      if(preferred){
+        const oldThread=getThread(preferred);
+        const match=threadMatchCandidates(mail,[preferred])[0]||{
+          row:preferred,score:0,explicit:false,
+          anchor:oldThread[oldThread.length-1]||preferred,
+          anchorIndex:Math.max(0,oldThread.length-1),
+          reasons:['Correo soltado directamente sobre esta RFQ']
+        };
+        showSimilarity(mail,[match]);return;
+      }
       const candidates=threadMatchCandidates(mail,cards);
       if(candidates.length){showSimilarity(mail,candidates);return}
       await addMail(mail);
     }
   }finally{isBusy=false}
 }
-function addFiles(files){const incoming=Array.from(files||[]);if(!incoming.length)return toast('El navegador no ha recibido archivos. Exporta el correo como .eml.','warning');queue.push(...incoming);processQueue()}
+function addFiles(files,targetId=null){
+  const incoming=Array.from(files||[]);
+  if(!incoming.length)return toast('El navegador no ha recibido archivos. Exporta el correo como .eml.','warning');
+  queue.push(...incoming.map(file=>({file,targetId})));
+  void processQueue();
+}
+// Llamado por el adaptador Outlook al soltar un .msg sobre una tarjeta existente.
+window.gesmailImportFilesToRFQ=(files,targetId)=>addFiles(files,targetId);
+
 function download(filename,text,type='application/json'){
   const a=document.createElement('a');const url=URL.createObjectURL(new Blob([text],{type}));a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1200);
 }
