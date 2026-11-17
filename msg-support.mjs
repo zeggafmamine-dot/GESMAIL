@@ -344,15 +344,24 @@ async function convertedFiles(files) {
   return result;
 }
 
-function sendToOriginalImporter(files) {
+function sendToOriginalImporter(files,targetId=null) {
   if (!files.length) return;
-  const input = document.getElementById('mailInput');
-  if (!input) { showError('No se encuentra el importador de correos de GESMAIL.'); return; }
-  const dt = new DataTransfer();
-  files.forEach(file => dt.items.add(file));
-  input.files = dt.files;
-  // Seguimos usando el importador original: RFQ, duplicados y similitud.
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+  // Usar directamente el importador. DataTransfer sintético + input.files
+  // falla con algunos ficheros virtuales de Outlook y algunos navegadores.
+  if(typeof window.gesmailImportFilesToRFQ==='function'){
+    window.gesmailImportFilesToRFQ(files,targetId);
+    return;
+  }
+  const input=document.getElementById('mailInput');
+  if(!input){showError('No se encuentra el importador de correos de GESMAIL.');return}
+  try{
+    const dt=new DataTransfer();
+    files.forEach(file=>dt.items.add(file));
+    input.files=dt.files;
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+  }catch(error){
+    showError('No se pudo entregar el correo al importador: '+error.message);
+  }
 }
 
 /**
@@ -367,12 +376,12 @@ export function enableMsgSupport() {
 
   input.accept = '.eml,.msg,message/rfc822,application/vnd.ms-outlook';
   const hint = dropZone.querySelector('p');
-  if (hint) hint.textContent = 'Arrastra correos directamente desde Outlook clásico (Edge o Chrome), o archivos .msg / .eml';
+  if (hint) hint.textContent = 'Arrastra .msg/.eml sobre una RFQ para comparar, o aquí para buscar hilos relacionados';
 
   const overlay = document.createElement('div');
   overlay.id = 'outlookDropOverlay';
   overlay.setAttribute('aria-hidden', 'true');
-  overlay.textContent = 'Suelta aquí el correo de Outlook para crear una RFQ';
+  overlay.textContent = 'Suelta sobre una RFQ para comparar hilos, o en otra zona para buscar coincidencias';
   Object.assign(overlay.style, {
     position: 'fixed',
     inset: '0',
@@ -432,16 +441,18 @@ export function enableMsgSupport() {
     // Leer las entradas ANTES de la primera espera asíncrona: DataTransfer
     // deja de estar disponible tras finalizar el evento drop.
     const files = filesFromTransfer(transfer);
+    // Guardar destino ANTES de cualquier await (la página puede volver a dibujarse).
+    const targetId = event.target?.closest?.('.rfq-card')?.dataset?.id || null;
     event.preventDefault();
     event.stopImmediatePropagation();
     hideOverlay();
 
     if (!files.length) {
-      showError('Outlook no ha entregado el correo al navegador. Prueba con Microsoft Edge o Chrome actualizado. Como alternativa, arrastra el correo al escritorio y después a GESMAIL.');
+      showError('Outlook no ha entregado ningún archivo al navegador. Prueba a guardar el .msg en el escritorio y arrastrarlo desde allí.');
       return;
     }
     const converted = await convertedFiles(files);
-    sendToOriginalImporter(converted);
+    sendToOriginalImporter(converted,targetId);
   }, true);
 
   window.addEventListener('blur', hideOverlay);
