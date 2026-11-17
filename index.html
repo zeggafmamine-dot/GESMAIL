@@ -398,7 +398,7 @@ function fileSize(size){
 }
 async function saveMailAttachments(mail){
   const parts=Array.isArray(mail._attachmentPayloads)?mail._attachmentPayloads:[];
-  if(!parts.length)return;
+  if(!parts.length){delete mail._attachmentPayloads;return;}
   let failed=0;
   for(const part of parts){
     const meta=(mail.attachments||[]).find(att=>att.id===part.id);
