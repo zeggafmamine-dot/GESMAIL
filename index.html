@@ -285,6 +285,10 @@ function duplicateReason(mail,row){
     if(mail.message_id && entry.message_id &&
       normalizeMessageId(mail.message_id)===normalizeMessageId(entry.message_id))return 'Message-ID idéntico';
     if(mail.raw_sha256 && entry.raw_sha256 && mail.raw_sha256===entry.raw_sha256)return 'Archivo idéntico';
+    // Dos correos con Message-ID diferentes pueden compartir asunto y texto
+    // (p.ej. respuestas cortas); no deben rechazarse como duplicados.
+    if(mail.message_id&&entry.message_id&&
+      normalizeMessageId(mail.message_id)!==normalizeMessageId(entry.message_id))continue;
     if(mail.email_fingerprint && entry.email_fingerprint &&
       mail.email_fingerprint===entry.email_fingerprint){
       const incoming=attachmentManifest(mail),existing=attachmentManifest(entry);
