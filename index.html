@@ -230,7 +230,7 @@ function getThread(card){
   return [{message_id:card.message_id||null,subject:card.subject||'',
     sender:card.sender||'',to:card.to||'',cc:card.cc||'',
     email_date:card.email_date||card.created_at||null,
-    body_preview:card.body_preview||'', original_filename:card.original_filename||'',
+    body_preview:card.body_preview||'',body_html:card.body_html||'',inline_images:card.inline_images||{}, original_filename:card.original_filename||'',
     raw_sha256:card.raw_sha256||null,email_fingerprint:card.email_fingerprint||null,
     normalized_subject:card.normalized_subject||'',
     normalized_body:card.normalized_body||''}];
@@ -241,7 +241,7 @@ function newThreadEntry(mail){
     sender:mail.sender||'',to:mail.to||'',cc:mail.cc||'',
     in_reply_to:mail.in_reply_to||null,references:mail.references||[],
     email_date:mail.email_date||null,imported_at:createdAt(),
-    body_preview:mail.body_preview||'',original_filename:mail.original_filename||'',
+    body_preview:mail.body_preview||'',body_html:mail.body_html||'',inline_images:mail.inline_images||{},original_filename:mail.original_filename||'',
     raw_sha256:mail.raw_sha256||null,email_fingerprint:mail.email_fingerprint||null,
     normalized_subject:mail.normalized_subject||'',normalized_body:mail.normalized_body||''};
 }
@@ -602,10 +602,77 @@ function extractText(raw,depth=0){
   if(/text\//i.test(mime))return text;
   return '';
 }
+
+const POSTAL_MIME_URL='https://esm.sh/postal-mime@4.2.0?bundle';
+let postalMimePromise=null;
+function getPostalMime(){
+  if(!postalMimePromise)postalMimePromise=import(POSTAL_MIME_URL)
+    .then(mod=>mod.default||mod.PostalMime)
+    .catch(err=>{postalMimePromise=null;throw err});
+  return postalMimePromise;
+}
+function addressString(address){
+  if(!address)return '';
+  if(typeof address==='string')return address;
+  if(Array.isArray(address))return address.map(addressString).filter(Boolean).join(', ');
+  if(Array.isArray(address.group))return (address.name?address.name+': ':'')+address.group.map(addressString).join(', ');
+  return address.name&&address.address?address.name+' <'+address.address+'>':address.address||address.name||'';
+}
+function htmlAsText(html){
+  const doc=new DOMParser().parseFromString(String(html||''),'text/html');
+  doc.querySelectorAll('script,style,noscript,head').forEach(el=>el.remove());
+  doc.querySelectorAll('br,p,div,li,tr,h1,h2,h3,h4').forEach(el=>el.append('\n'));
+  return (doc.body?.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
+}
+function inlineEmailImages(attachments,html){
+  const map={};let remaining=500*1024;
+  for(const att of attachments||[]){
+    const id=String(att.contentId||'').replace(/^<|>$/g,'').trim().toLowerCase();
+    const mime=String(att.mimeType||'').toLowerCase();
+    const encoded=typeof att.content==='string'?att.content:'';
+    if(!id||!/^image\/(png|jpeg|gif|webp)$/.test(mime)||!encoded)continue;
+    const estimatedSize=Math.floor(encoded.length*3/4);
+    if(estimatedSize>300*1024||estimatedSize>remaining)continue;
+    const lower=html.toLowerCase();
+    if(!lower.includes('cid:'+id)&&!lower.includes('cid:'+encodeURIComponent(id).toLowerCase()))continue;
+    if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))continue;
+    remaining-=estimatedSize;
+    map[id]='data:'+mime+';base64,'+encoded;
+  }
+  return map;
+}
+async function parsedMailWithHtml(buf,file){
+  const PostalMime=await getPostalMime();
+  if(typeof PostalMime?.parse!=='function')throw new Error('Lector MIME no disponible');
+  const mail=await PostalMime.parse(buf,{attachmentEncoding:'base64'});
+  if(!mail?.subject&&!mail?.from&&!mail?.headers?.length)throw new Error('Formato no reconocido');
+  const subject=String(mail.subject||'(Sin asunto)').trim();
+  const sender=addressString(mail.from)||(mail.headers||[]).find(x=>x.key==='from')?.value||'(Sin remitente)';
+  const to=addressString(mail.to),cc=addressString(mail.cc);
+  const body_html=String(mail.html||'').slice(0,300000);
+  const fullText=String(mail.text||htmlAsText(body_html)).trim();
+  const normalized_subject=normalizeSubject(subject);
+  const normalized_body=normalize(fullText).slice(0,14000);
+  const getHeader=name=>(mail.headers||[]).find(h=>h.key===name)?.value||'';
+  const msgId=normalizeMessageId(getHeader('message-id'));
+  const idList=text=>(String(text||'').match(/<[^>]+>/g)||String(text||'').split(/\s+/)).map(normalizeMessageId).filter(Boolean);
+  const in_reply_to=idList(getHeader('in-reply-to'))[0]||null;
+  const references=idList(getHeader('references'));
+  const fingerprint=[normalizeSender(sender),normalized_subject,normalized_body];
+  if(!normalized_body)fingerprint.push(mail.date||'');
+  return {subject,sender,to,cc,body_preview:fullText.slice(0,14000),body_html,
+    inline_images:body_html?inlineEmailImages(mail.attachments,body_html):{},
+    email_date:mail.date||getHeader('date')||null,message_id:msgId,in_reply_to,references,
+    normalized_subject,normalized_body,raw_sha256:await sha256(buf),
+    email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
+}
+
 async function parseEML(file){
   if(file.size>MAX_EMAIL_BYTES)throw new Error('El archivo supera el máximo de 35 MB.');
   if(!/\.eml$/i.test(file.name))throw new Error('Esta demo admite archivos .msg y .eml de Outlook.');
   const buf=await file.arrayBuffer();
+  try{return await parsedMailWithHtml(buf,file)}
+  catch(err){console.warn('GESMAIL: MIME avanzado no disponible, usando texto básico.',err)}
   const raw=new TextDecoder('utf-8',{fatal:false}).decode(buf);
   const {headers}=splitEmail(raw),h=unfoldHeaders(headers);
   if(!h.subject&&!h.from&&!h['message-id'])throw new Error('El archivo no parece ser un correo EML válido.');
