@@ -8,6 +8,7 @@ Demo web del tablero de solicitudes de oferta (RFQ) del departamento comercial.
 - Aviso y bloqueo de duplicados exactos (Message-ID, huella o fichero idéntico).
 - Avisos con porcentaje estimado de similitud para correos parecidos.
 - En cada RFQ, **asunto**, **remitente**, **destinatarios** y **personas en copia (CC)** se obtienen automáticamente al importar un correo; **empresa** y **propietario/responsable** se asignan manualmente.
+- **Lector de correo de solo lectura**, dentro del hilo de cada RFQ: abre **Leer correo completo** para ver asunto, remitente, destinatarios, CC, fecha y cuerpo HTML con tipografías, tablas, colores y firmas; las imágenes incrustadas por CID se muestran si el archivo las contiene, y las imágenes remotas requieren activación manual. Ningún correo se puede editar desde GESMAIL.
 - **Hilo de correos** dentro de cada ficha: mensajes con fecha, remitente, To, CC y vista previa del cuerpo. Las respuestas que contienen `In-Reply-To` o `References` se enlazan automáticamente mediante `Message-ID` a un mensaje ya importado. En avisos de similitud también se ofrece **Añadir al hilo** manualmente.
 - **Usuarios del equipo** configurables desde el menú lateral, guardados **sólo en ese navegador** (no hay todavía registro, autenticación ni permisos reales).
 - Creación manual, edición y cambio de estado de RFQ.
@@ -30,7 +31,10 @@ Dirección prevista: https://zeggafmamine-dot.github.io/GESMAIL/
 - No hay inicio de sesión ni controles de acceso.
 - El repositorio y la página GitHub Pages son **públicos**. **No subas correos ni datos comerciales reales al repositorio.**
 - La aplicación procesa los correos localmente, sin enviarlos a un servidor, pero sigue siendo una demostración, no un entorno de producción.
-- La importación de `.msg` convierte el mensaje **en memoria** al formato que entiende el tablero, sin subir los archivos a GitHub. Extrae asunto, remitente, Para, CC, encabezados de respuesta y cuerpo de texto (HTML o RTF como alternativa). No se guardan los archivos ni sus adjuntos.
+- La importación de `.msg` convierte el mensaje **en memoria** a MIME sin subir archivos a GitHub. Conserva el HTML original del mensaje cuando existe y las imágenes de firma incrustadas mediante CID dentro de límites de tamaño. Si sólo existe texto o RTF, se muestra una versión de texto. Los archivos adjuntos normales no se guardan.
+- Los `.eml` se analizan con `postal-mime` desde `esm.sh` para conservar HTML, firmas e imágenes CID. Si no se puede cargar el lector MIME, se utiliza una lectura básica de texto (sin formato). El lector de MSG continúa dependiendo del módulo externo indicado abajo.
+- La vista HTML se abre en un iframe aislado y sin scripts: no hay edición, respuesta ni envío de correos. Las imágenes remotas se bloquean por defecto; el usuario puede elegir mostrarlas, con el riesgo habitual de que el servidor remoto registre la carga.
+- Los mensajes HTML están sujetos a límites de almacenamiento por navegador; para ficheros grandes, algunas imágenes incrustadas podrían omitirse. No es un clon perfecto del motor Word de Outlook, por lo que ciertos elementos especiales pueden verse distintos.
 - El lector `.msg` (`@npeersab/msgreader` v5.1.0) se descarga en el navegador desde `esm.sh` la primera vez que se importa uno: requiere conexión a Internet y acceso a ese dominio. Si la descarga falla, el programa muestra un aviso.
 - **Arrastre directo desde Outlook clásico:** abre GESMAIL en **Microsoft Edge o Google Chrome actualizados**, coloca Outlook y el navegador lado a lado y arrastra el correo de la lista de mensajes a **cualquier parte de GESMAIL**. Aparece una capa azul indicando dónde soltarlo. El correo se convierte a EML en memoria y entra por el importador existente, respetando los controles de duplicados y similitud.
 - Se admiten varios correos en un mismo arrastre si Outlook y el navegador los entregan. También siguen disponibles el selector de archivos y los `.msg`/`.eml` guardados en el explorador.
@@ -45,6 +49,8 @@ El sitio utiliza `index.html` directamente, con HTML, CSS y JavaScript legibles.
 3. Abre una tarjeta, rellena **Empresa** y selecciona **Propietario de la RFQ**. El remitente, asunto y CC vienen del correo importado.
    También puedes usar **+ Añadir correo al hilo** dentro de la ficha y seleccionar archivos `.msg` o `.eml` aunque no tengan cabeceras de respuesta.
 4. Importa después una respuesta relacionada. Si incluye las cabeceras de respuesta, se añadirá al hilo automáticamente. Si no las incluye pero se parece a una RFQ existente, puedes seleccionar **Añadir al hilo de esta RFQ** en la ventana de similitud.
-5. Exporta una copia JSON con **Exportar datos** si quieres conservarla fuera de este navegador.
+5. En el hilo, pulsa **Leer correo completo** para abrir el mensaje en un visor grande de solo lectura. Las firmas e imágenes incrustadas aparecerán si los datos están presentes en el `.msg` / `.eml`. Las imágenes alojadas en servidores externos requieren pulsar **Mostrar imágenes externas**.
+6. Los correos que se importaron antes de añadir este visor pueden conservar sólo una vista previa de texto. Vuelve a importar su archivo original para actualizar su representación enriquecida sin duplicar la RFQ si los datos identificadores coinciden.
+7. Exporta una copia JSON con **Exportar datos** si quieres conservarla fuera de este navegador.
 
 **Limitaciones:** importar un solo correo no descarga mágicamente todos los mensajes de Outlook. El hilo muestra únicamente los correos que has incorporado a GESMAIL; si en su cuerpo hay mensajes citados también pueden verse dentro de ese cuerpo. Las RFQ antiguas mantienen sus campos e historial, pero no es posible reconstruir CC, encabezados de respuesta o mensajes anteriores que no fueron guardados. Los usuarios configurados son nombres locales, no cuentas registradas. En particular, la web pública no está preparada para usar datos comerciales confidenciales reales.
