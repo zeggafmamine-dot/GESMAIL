@@ -435,37 +435,52 @@ function findThreadByReply(mail){
 
 
 
-function upgradeEmailFormat(targetId,mail){
-  if(!mail.body_html)return false;
+
+async function upgradeEmailFormat(targetId,mail){
   const row=cards.find(c=>c.id===targetId);
   if(!row)return false;
-  let upgraded=false;
-  const thread=getThread(row).map(entry=>{
-    if(!duplicateReason(mail,{...entry,thread:[]}))return entry;
+  const oldThread=getThread(row);
+  const matches=oldThread.filter(entry=>duplicateReason(mail,{...entry,thread:[]}));
+  if(!matches.length)return false;
+  const incomingImages=mail.inline_images||{};
+  const needsChange=matches.some(entry=>{
     const currentImages=entry.inline_images||{};
-    const incomingImages=mail.inline_images||{};
-    const images={...currentImages,...incomingImages};
-    const hasNewImages=Object.keys(incomingImages).some(cid=>currentImages[cid]!==incomingImages[cid]);
-    const betterHtml=!entry.body_html||mail.body_html.length>entry.body_html.length;
-    if(!hasNewImages&&!betterHtml)return entry;
-    upgraded=true;
-    return {...entry,body_html:betterHtml?mail.body_html:entry.body_html,
-      inline_images:images,body_preview:mail.body_preview||entry.body_preview};
+    const haveAttachments=entry.attachments||[];
+    const missingParts=(mail.attachments||[]).some(att=>!haveAttachments.some(a=>a.id===att.id&&a.stored));
+    return !entry.body_html&&!!mail.body_html ||
+      (mail.body_html&&mail.body_html.length>(entry.body_html||'').length) ||
+      Object.keys(incomingImages).some(cid=>currentImages[cid]!==incomingImages[cid]) ||
+      missingParts;
   });
-  if(!upgraded)return false;
-  const next=cards.map(c=>c.id===targetId?{...c,thread,updated_at:createdAt()}:c);
+  if(!needsChange)return false;
+  await saveMailAttachments(mail);
+  const nextThread=oldThread.map(entry=>{
+    if(!duplicateReason(mail,{...entry,thread:[]}))return entry;
+    const oldParts=entry.attachments||[];
+    const merged=[...oldParts];
+    for(const att of mail.attachments||[]){
+      const found=merged.findIndex(x=>x.id===att.id);
+      if(found>=0)merged[found]={...merged[found],...att,stored:!!(merged[found].stored||att.stored)};
+      else merged.push(att);
+    }
+    return {...entry,body_html:(mail.body_html||'').length>(entry.body_html||'').length?mail.body_html:entry.body_html,
+      inline_images:{...(entry.inline_images||{}),...incomingImages},
+      body_preview:mail.body_preview||entry.body_preview,attachments:merged};
+  });
+  const next=cards.map(c=>c.id===targetId?{...c,thread:nextThread,updated_at:createdAt()}:c);
   if(!persist(next))return false;
-  toast('Firma e imágenes del correo actualizadas sin duplicar la RFQ.','success');
+  toast('Correo actualizado con HTML y archivos adjuntos, sin duplicar la RFQ.','success');
   return true;
 }
-function appendMailToThread(id,mail){
+async function appendMailToThread(id,mail){
   const row=cards.find(c=>c.id===id);
   if(!row)return false;
   if(duplicateReason(mail,row)){
-    if(upgradeEmailFormat(id,mail))return true;
+    if(await upgradeEmailFormat(id,mail))return true;
     toast('Este mensaje ya está en el hilo y no se ha añadido de nuevo.','warning');
     return false;
   }
+  await saveMailAttachments(mail);
   const now=createdAt();
   const next=cards.map(c=>{
     if(c.id!==id)return c;
@@ -885,11 +900,11 @@ function openCard(id){
           const row=cards.find(c=>c.id===id);
           if(!row)break;
           if(duplicateReason(mail,row)){
-            if(upgradeEmailFormat(id,mail)){imported++;continue;}
+            if(await upgradeEmailFormat(id,mail)){imported++;continue;}
             toast('El mensaje ya está incluido en este hilo.','warning');
             continue;
           }
-          if(appendMailToThread(id,mail))imported++;
+          if(await appendMailToThread(id,mail))imported++;
         }catch(err){toast('No se pudo añadir '+file.name+': '+err.message,'error')}
       }
       if(imported){
@@ -1177,7 +1192,8 @@ async function parseEML(file){
     normalized_subject,normalized_body,raw_sha256:await sha256(buf),
     email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
 }
-function addMail(mail){
+async function addMail(mail){
+  await saveMailAttachments(mail);
   const now=createdAt(),row={...mail,id:uuid(),client:'',owner_name:'',
     offer_reference:'',notes:'',priority:'Normal',stage:'Petición',
     thread:[newThreadEntry(mail)],created_at:now,updated_at:now,
@@ -1197,13 +1213,14 @@ function showSimilarity(mail,matches){
   $('modalHost').querySelectorAll('[data-add-to-thread]').forEach(btn=>btn.onclick=()=>resolveSimilarity(false,btn.dataset.addToThread));
   $('modalHost').querySelector('[data-close]').onclick=e=>{e.preventDefault();resolveSimilarity(false)};
 }
-function resolveSimilarity(accept,targetId=null){
+async function resolveSimilarity(accept,targetId=null){
   const mail=pendingSimilarity;
   pendingSimilarity=null;
   closeModal();
-  if(mail&&targetId)appendMailToThread(targetId,mail);
-  else if(accept&&mail)addMail(mail);
-  processQueue();
+  try{
+    if(mail&&targetId)await appendMailToThread(targetId,mail);
+    else if(accept&&mail)await addMail(mail);
+  }finally{processQueue();}
 }
 async function processQueue(){
   if(isBusy||pendingSimilarity)return;
@@ -1215,17 +1232,17 @@ async function processQueue(){
       catch(e){toast(`${file.name}: ${e.message}`,'error');continue}
       const result=allMatches(mail,cards.filter(c=>c.email_fingerprint||c.message_id||c.raw_sha256||getThread(c).length));
       if(result.duplicate){
-        if(upgradeEmailFormat(result.duplicate.id,mail))continue;
+        if(await upgradeEmailFormat(result.duplicate.id,mail))continue;
         toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');
         continue;
       }
       const replyTarget=findThreadByReply(mail);
       if(replyTarget){
-        appendMailToThread(replyTarget.id,mail);
+        await appendMailToThread(replyTarget.id,mail);
         continue;
       }
       if(result.similar.length){showSimilarity(mail,result.similar);return}
-      addMail(mail);
+      await addMail(mail);
     }
   }finally{isBusy=false}
 }
