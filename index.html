@@ -402,6 +402,100 @@ function makeModal(title,subtitle,body,actions,eyebrow='DETALLE DE RFQ'){
   const overlay=$('modalHost').querySelector('.overlay');overlay.addEventListener('mousedown',e=>{if(e.target===overlay&&pendingSimilarity===null)closeModal()});
   const first=overlay.querySelector('input,select,button');first?.focus();
 }
+
+function buildEmailDocument(message,allowRemoteImages=false){
+  const html=String(message.body_html||'');
+  const content=new DOMParser().parseFromString(html||'<html><body><pre></pre></body></html>','text/html');
+  if(!html)content.querySelector('pre').textContent=message.body_preview||'El cuerpo no está disponible.';
+  const styles=[...content.head.querySelectorAll('style')]
+    .map(x=>x.textContent.slice(0,30000)).slice(0,15).join('\n').replace(/<\//g,'<\\/');
+  content.querySelectorAll('script,noscript,iframe,frame,frameset,object,embed,applet,meta,link,base,form,input,textarea,select,button,video,audio,svg,math,canvas,template').forEach(el=>el.remove());
+  const images=message.inline_images&&typeof message.inline_images==='object'?message.inline_images:{};
+  const cidValue=value=>{
+    try{return decodeURIComponent(value).replace(/^<|>$/g,'').trim().toLowerCase()}
+    catch{return value.replace(/^<|>$/g,'').trim().toLowerCase()}
+  };
+  content.body.querySelectorAll('*').forEach(el=>{
+    for(const attribute of [...el.attributes]){
+      const name=attribute.name.toLowerCase();
+      if(name.startsWith('on')||['contenteditable','srcdoc','srcset','formaction','autofocus','ping','integrity'].includes(name)){
+        el.removeAttribute(attribute.name);
+      }
+    }
+    if(el.tagName==='A'){
+      const href=el.getAttribute('href')||'';
+      if(!/^(https?:|mailto:|tel:)/i.test(href))el.removeAttribute('href');
+      else {el.setAttribute('target','_blank');el.setAttribute('rel','noopener noreferrer nofollow');}
+    }
+    if(el.tagName==='IMG'){
+      const original=(el.getAttribute('src')||'').trim();
+      let source='';
+      if(/^cid:/i.test(original))source=images[cidValue(original.slice(4))]||'';
+      else if(/^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(original)&&original.length<700000)source=original;
+      else if(allowRemoteImages&&/^https?:\/\//i.test(original))source=original;
+      if(source)el.setAttribute('src',source);
+      else {el.removeAttribute('src');if(!el.getAttribute('alt'))el.setAttribute('alt',/^https?:/i.test(original)?'Imagen externa bloqueada':'Imagen no disponible');}
+      el.removeAttribute('srcset');
+      el.setAttribute('loading','lazy');
+    }
+    if(el.tagName!=='IMG'&&el.hasAttribute('src'))el.removeAttribute('src');
+    if(el.hasAttribute('background'))el.removeAttribute('background');
+  });
+  const docStyle='<style>html{font-family:Arial,"Segoe UI",sans-serif;color:#1f2937;background:#fff;font-size:14px}'+
+    'body{margin:0;padding:25px 28px;line-height:1.52;overflow-wrap:anywhere;min-width:0}'+
+    'img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 Arial,sans-serif}'+
+    'a{color:#1767c3}@media(max-width:600px){body{padding:16px}}</style>';
+  const policy="default-src 'none'; img-src data:"+(allowRemoteImages?' https: http:':'')+
+    "; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; connect-src 'none'; object-src 'none';";
+  const meta='<meta http-equiv="Content-Security-Policy" content="'+policy+'">';
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">'+meta+
+    '<meta name="referrer" content="no-referrer">'+docStyle+'<style>'+styles+'</style></head><body>'+
+    content.body.innerHTML+'</body></html>';
+}
+function showEmailReader(message,defaultSubject=''){
+  const host=$('emailReaderHost');
+  host.replaceChildren();
+  const previousFocus=document.activeElement;
+  const backdrop=document.createElement('div');
+  backdrop.className='reader-shade';
+  backdrop.innerHTML='<section class="reader-window" role="dialog" aria-modal="true" aria-labelledby="gesmail-reader-subject">'+
+    '<div class="reader-top"><span class="reader-brand">GESMAIL · LECTOR DE CORREO</span>'+
+    '<div class="reader-top-actions"><button type="button" class="reader-remote">Mostrar imágenes externas</button>'+
+    '<button type="button" class="reader-close" aria-label="Cerrar lector">×</button></div></div>'+
+    '<div class="reader-header"><h2 id="gesmail-reader-subject"></h2>'+
+    '<div class="reader-identity"><span class="reader-avatar" aria-hidden="true"></span>'+
+    '<div><div class="reader-from"></div><div class="reader-date"></div></div></div>'+
+    '<div class="reader-meta"><b>Para:</b><span class="reader-to"></span><b>CC:</b><span class="reader-cc"></span></div></div>'+
+    '<div class="reader-paper"><iframe class="reader-frame" title="Contenido del correo (solo lectura)" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe></div>'+
+    '<div class="reader-footer"><span>Correo original · Solo lectura · Sin posibilidad de edición</span><button type="button" class="reader-close">Cerrar</button></div></section>';
+  backdrop.querySelector('#gesmail-reader-subject').textContent=message.subject||defaultSubject||'Sin asunto';
+  backdrop.querySelector('.reader-from').textContent=message.sender||'Remitente no disponible';
+  backdrop.querySelector('.reader-avatar').textContent=(message.sender||'?').replace(/^[<\s]+/,'').charAt(0).toUpperCase();
+  backdrop.querySelector('.reader-date').textContent=longDate(message.email_date||message.imported_at);
+  backdrop.querySelector('.reader-to').textContent=message.to||'No consta';
+  backdrop.querySelector('.reader-cc').textContent=message.cc||'Sin personas en copia';
+  const frame=backdrop.querySelector('iframe');
+  const remoteBtn=backdrop.querySelector('.reader-remote');
+  remoteBtn.hidden=!/https?:\/\//i.test(message.body_html||'');
+  let showRemote=false;
+  const renderFrame=()=>{frame.srcdoc=buildEmailDocument(message,showRemote)};
+  renderFrame();
+  remoteBtn.onclick=()=>{showRemote=!showRemote;renderFrame();remoteBtn.textContent=showRemote?'Ocultar imágenes externas':'Mostrar imágenes externas'};
+  function close(){
+    document.removeEventListener('keydown',onKey,true);
+    host.replaceChildren();
+    if(previousFocus?.isConnected)previousFocus.focus();
+  }
+  function onKey(event){
+    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
+  }
+  backdrop.querySelectorAll('.reader-close').forEach(btn=>btn.addEventListener('click',close));
+  backdrop.addEventListener('mousedown',event=>{if(event.target===backdrop)close()});
+  host.append(backdrop);
+  document.addEventListener('keydown',onKey,true);
+  backdrop.querySelector('.reader-close').focus();
+}
+
 function openCard(id){
   const c=cards.find(x=>x.id===id);
   if(!c)return;
@@ -420,7 +514,7 @@ function openCard(id){
         <div><strong>Para:</strong> ${esc(m.to||'No consta')}</div>
         <div><strong>CC:</strong> ${esc(m.cc||'Sin personas en copia')}</div>
         <div><strong>Fecha:</strong> ${esc(longDate(m.email_date||m.imported_at))}</div>
-        ${m.body_preview?`<pre class="thread-mail-body">${esc(m.body_preview)}</pre>`:'<p class="thread-empty">El cuerpo de este mensaje no está disponible.</p>'}
+        ${m.body_preview?`<p class="thread-mail-preview">${esc(m.body_preview.slice(0,240))}</p>`:'<p class="thread-empty">Abre el lector para consultar el contenido disponible.</p>'}<button type="button" class="read-message" data-read-message="${i}">Leer correo completo</button>
       </div>
     </details>`).join(''):'<p class="thread-empty">Esta RFQ se creó sin correo. Importa un mensaje relacionado para añadirlo al hilo.</p>';
   const body=`<div class="rfq-summary">
@@ -444,6 +538,8 @@ function openCard(id){
   <div class="history"><b>Historial de la RFQ</b><ul>${(c.history||[]).slice().reverse().map(h=>`<li>${esc(h.event)} · ${esc(longDate(h.at))}</li>`).join('')}</ul></div>`;
   makeModal(c.subject,c.client||'Ficha de solicitud de oferta',body,'<button id="deleteCardBtn" type="button" class="danger delete-business">Borrar negocio</button><button class="secondary" data-close>Cancelar</button><button id="saveCardBtn" class="primary">Guardar cambios</button>');
   $('deleteCardBtn').onclick=()=>deleteCard(id);
+  $('modalHost').querySelectorAll('[data-read-message]').forEach(button=>button.addEventListener('click',()=>showEmailReader(thread[Number(button.dataset.readMessage)],c.subject)));
+
   const threadFileInput=$('threadMailInput');
   $('addThreadMailBtn').onclick=()=>threadFileInput.click();
   threadFileInput.addEventListener('change',async()=>{
