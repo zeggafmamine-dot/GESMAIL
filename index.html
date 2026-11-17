@@ -167,7 +167,7 @@
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
 const STAGES = ['Petición', 'Oferta enviada', 'Oferta perdida', 'Pedido ganado'];
 const SIMILARITY_THRESHOLD = 76;
-const MAX_EMAIL_BYTES = 35 * 1024 * 1024;
+const MAX_EMAIL_BYTES = 80 * 1024 * 1024;
 function normalize(value) {
   return String(value || '').normalize('NFKC').toLowerCase()
     .replace(/https?:\/\/\S+/g, ' ')
@@ -1152,9 +1152,11 @@ async function deleteCard(id){
   if(!confirmed)return;
   const remaining=cards.filter(c=>c.id!==id);
   if(remaining.length===cards.length)return toast('El negocio ya no existe.','warning');
+  const previous=cards.slice();
   if(!persist(remaining))return;
+  await removeUnreferencedAttachments(previous,remaining);
   closeModal();
-  toast('Negocio eliminado correctamente.','success');
+  toast('Negocio eliminado correctamente, incluidos sus adjuntos locales.','success');
 }
 function newCard(){
   const body=`<form id="newForm" class="form-grid">
@@ -1322,11 +1324,14 @@ async function parsedMailWithHtml(buf,file){
 }
 
 async function parseEML(file){
-  if(file.size>MAX_EMAIL_BYTES)throw new Error('El archivo supera el máximo de 35 MB.');
+  if(file.size>MAX_EMAIL_BYTES)throw new Error('El archivo supera el máximo de 80 MB.');
   if(!/\.eml$/i.test(file.name))throw new Error('Esta demo admite archivos .msg y .eml de Outlook.');
   const buf=await file.arrayBuffer();
   try{return await parsedMailWithHtml(buf,file)}
-  catch(err){console.warn('GESMAIL: MIME avanzado no disponible, usando texto básico.',err)}
+  catch(err){
+    console.warn('GESMAIL: MIME avanzado no disponible, usando texto básico.',err);
+    toast('El analizador de correo avanzado no está disponible. Se importará texto sin adjuntos.','warning');
+  }
   const raw=new TextDecoder('utf-8',{fatal:false}).decode(buf);
   const {headers}=splitEmail(raw),h=unfoldHeaders(headers);
   if(!h.subject&&!h.from&&!h['message-id'])throw new Error('El archivo no parece ser un correo EML válido.');
@@ -1405,17 +1410,65 @@ function addFiles(files){const incoming=Array.from(files||[]);if(!incoming.lengt
 function download(filename,text,type='application/json'){
   const a=document.createElement('a');const url=URL.createObjectURL(new Blob([text],{type}));a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1200);
 }
-function exportBackup(){download('rfq-equipo-demo-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({format:'rfq-equipo-demo-v1',exported_at:createdAt(),cards},null,2));toast('Copia de seguridad exportada.','success')}
+
+async function exportBackup(){
+  try{
+    const payloads={};
+    const ids=savedAttachmentIds(cards);
+    let missing=0,bytes=0;
+    for(const id of ids){
+      const blob=await getAttachmentBlob(id).catch(()=>null);
+      if(!blob){missing++;continue}
+      bytes+=blob.size;
+      if(bytes>80*1024*1024){missing++;continue}
+      payloads[id]={mime:blob.type||'application/octet-stream',base64:bytesToBase64(await blob.arrayBuffer())};
+    }
+    download('rfq-equipo-demo-'+new Date().toISOString().slice(0,10)+'.json',
+      JSON.stringify({format:'rfq-equipo-demo-v1',exported_at:createdAt(),cards,attachment_payloads:payloads},null,2));
+    toast(missing?'Copia exportada. '+missing+' adjunto(s) no pudieron incluirse.':
+      'Copia exportada con los adjuntos guardados en este navegador.',missing?'warning':'success');
+  }catch(e){toast('No se pudo crear la copia: '+e.message,'error')}
+}
 async function importBackup(file){
-  try{const parsed=JSON.parse(await file.text());if(parsed?.format!=='rfq-equipo-demo-v1'||!Array.isArray(parsed.cards))throw new Error('Formato de copia no reconocido.');
+  try{
+    const parsed=JSON.parse(await file.text());
+    if(parsed?.format!=='rfq-equipo-demo-v1'||!Array.isArray(parsed.cards))
+      throw new Error('Formato de copia no reconocido.');
     const clean=parsed.cards.filter(c=>c&&c.id&&STAGES.includes(c.stage));
     if(!await confirmAction({
       title:'¿Restaurar copia de seguridad?',
-      description:`Se reemplazarán las ${cards.length} RFQ actuales por las ${clean.length} RFQ de la copia de seguridad.`,
+      description:'Se reemplazarán las '+cards.length+' RFQ actuales por las '+clean.length+' RFQ de la copia de seguridad.',
       note:'Los datos actuales que no estén en la copia se perderán.',
       confirmLabel:'Restaurar copia'
     }))return;
-    if(persist(clean))toast('Copia de seguridad restaurada.','success');
+    const payloads=parsed.attachment_payloads&&typeof parsed.attachment_payloads==='object'?
+      parsed.attachment_payloads:{};
+    const ids=savedAttachmentIds(clean);
+    let failed=0,total=0;
+    const restored=new Set();
+    for(const id of ids){
+      const payload=payloads[id];
+      if(!payload||typeof payload.base64!=='string'||payload.base64.length>22*1024*1024){failed++;continue}
+      try{
+        const bytes=base64ToBytes(payload.base64);
+        total+=bytes.length;
+        if(bytes.length>MAX_STORED_ATTACHMENT||total>80*1024*1024)throw new Error('Adjuntos demasiado grandes');
+        await putAttachmentBlob(id,new Blob([bytes],{type:String(payload.mime||'application/octet-stream')}));
+        restored.add(id);
+      }catch(e){failed++;console.warn('GESMAIL: no se pudo restaurar adjunto',id,e)}
+    }
+    // Las copias anteriores no incluyen binarios, sólo referencias.
+    for(const row of clean){
+      for(const entry of getThread(row)){
+        for(const att of entry.attachments||[])if(att.id)att.stored=restored.has(att.id);
+      }
+    }
+    const old=cards.slice();
+    if(persist(clean)){
+      await removeUnreferencedAttachments(old,clean);
+      toast(failed?'Copia restaurada. '+failed+' adjunto(s) no pudieron recuperarse.':
+        'Copia restaurada con los archivos adjuntos.',failed?'warning':'success');
+    }
   }catch(e){toast('No se pudo importar la copia: '+e.message,'error')}
 }
 function loadExamples(){
@@ -1480,7 +1533,11 @@ $('clearBtn').onclick=async()=>{
     note:'Esta acción no se puede deshacer.',
     confirmLabel:'Borrar todas'
   })){
-    if(persist([]))toast('Tablero restablecido.','success');
+    const previous=cards.slice();
+    if(persist([])){
+      await removeUnreferencedAttachments(previous,[]);
+      toast('Tablero restablecido, incluidos sus adjuntos.','success');
+    }
   }
 };
 const drop=$('dropZone');
