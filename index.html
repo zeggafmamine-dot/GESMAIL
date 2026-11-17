@@ -446,7 +446,7 @@ function getThread(card){
   return [{message_id:card.message_id||null,subject:card.subject||'',
     sender:card.sender||'',to:card.to||'',cc:card.cc||'',
     email_date:card.email_date||card.created_at||null,
-    body_preview:card.body_preview||'',body_html:card.body_html||'',inline_images:card.inline_images||{},attachments:card.attachments||[], original_filename:card.original_filename||'',
+    body_preview:card.body_preview||'',body_html:card.body_html||'',inline_images:card.inline_images||{},attachments:card.attachments||[],import_warning:card.import_warning||'', original_filename:card.original_filename||'',
     raw_sha256:card.raw_sha256||null,email_fingerprint:card.email_fingerprint||null,
     normalized_subject:card.normalized_subject||'',
     normalized_body:card.normalized_body||''}];
@@ -457,7 +457,7 @@ function newThreadEntry(mail){
     sender:mail.sender||'',to:mail.to||'',cc:mail.cc||'',
     in_reply_to:mail.in_reply_to||null,references:mail.references||[],
     email_date:mail.email_date||null,imported_at:createdAt(),
-    body_preview:mail.body_preview||'',body_html:mail.body_html||'',inline_images:mail.inline_images||{},attachments:mail.attachments||[],original_filename:mail.original_filename||'',
+    body_preview:mail.body_preview||'',body_html:mail.body_html||'',inline_images:mail.inline_images||{},attachments:mail.attachments||[],import_warning:mail.import_warning||'',original_filename:mail.original_filename||'',
     raw_sha256:mail.raw_sha256||null,email_fingerprint:mail.email_fingerprint||null,
     normalized_subject:mail.normalized_subject||'',normalized_body:mail.normalized_body||''};
 }
@@ -951,7 +951,8 @@ function showEmailReader(message,defaultSubject='',conversation=null,startIndex=
     shade.querySelector('.reader-zoom-value').textContent=zoom+'%';
     const missing=missingCidImages(current);
     let message='';
-    if(missing)message='Hay '+missing+' imágenes incrustadas que no se han podido recuperar. Reimporta el archivo .msg o .eml original para mejorar la firma.';
+    if(current.import_warning)message=current.import_warning;
+    else if(missing)message='Hay '+missing+' imágenes incrustadas que no se han podido recuperar. Reimporta el archivo .msg o .eml original para mejorar la firma.';
     else if(!allowRemote&&usesRemoteImages(current))message='Las imágenes alojadas fuera del correo están bloqueadas por privacidad. Puedes activarlas desde “Mostrar imágenes externas”.';
     notice.textContent=message;
     notice.hidden=!message;
@@ -1359,6 +1360,7 @@ async function parseEML(file){
   const fingerprint=[normalizeSender(sender),normalized_subject,normalized_body];
   if(!normalized_body)fingerprint.push(h.date||'');
   return {subject,sender,to,cc,body_preview:body.slice(0,5000),email_date:h.date||null,
+    import_warning:'Este correo se importó únicamente como texto: no fue posible recuperar su HTML ni sus adjuntos.',
     message_id:msgId,in_reply_to,references,
     normalized_subject,normalized_body,raw_sha256:await sha256(buf),
     email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
