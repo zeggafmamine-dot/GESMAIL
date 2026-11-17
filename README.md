@@ -34,4 +34,4 @@ Dirección prevista: https://zeggafmamine-dot.github.io/GESMAIL/
 - La importación de `.msg` utiliza los mismos controles de duplicados y similitud que `.eml`; se basa en Message-ID, datos normalizados y contenido extraído. Los porcentajes son orientativos.
 - El porcentaje de parecido es una heurística aproximada, no una garantía de duplicación.
 
-El sitio carga un paquete HTML comprimido dentro del propio `index.html` y el módulo `msg-support.mjs` para MSG. Requiere un navegador moderno compatible con `DecompressionStream`, módulos JavaScript y `DataTransfer`.
+El sitio utiliza `index.html` directamente, con HTML, CSS y JavaScript legibles. Los avisos se presentan como tarjetas emergentes centradas desde la función `toast()` del propio tablero (no dependen de CSS añadido después). El lector de MSG continúa en `msg-support.mjs`. Requiere un navegador moderno compatible con módulos JavaScript y `DataTransfer`.
