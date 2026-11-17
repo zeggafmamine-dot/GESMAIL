@@ -108,6 +108,72 @@ function inlineMsgImages(info,reader,html) {
   }
   return {images,html:resultHtml};
 }
+
+// Los adjuntos reales van como partes MIME (antes se perdían al convertir MSG a EML).
+const MAX_MSG_ATTACHMENT_BYTES=15*1024*1024;
+const MAX_MSG_ATTACHMENTS_TOTAL=25*1024*1024;
+function attachmentMime(name,provided) {
+  const type=String(provided||'').trim().toLowerCase();
+  if(/^[\w.+-]+\/[\w.+-]+$/.test(type))return type;
+  const extension=String(name||'').split('.').pop().toLowerCase();
+  return ({pdf:'application/pdf',doc:'application/msword',
+    docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:'application/vnd.ms-excel',
+    xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    csv:'text/csv',txt:'text/plain',zip:'application/zip',
+    png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',
+    webp:'image/webp',ppt:'application/vnd.ms-powerpoint',
+    pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation'})[extension]||'application/octet-stream';
+}
+function msgAttachmentPayloads(info,reader,inlineImages) {
+  const files=[];
+  const usedCids=new Set(inlineImages.map(image=>normalizeImageRef(image.cid)));
+  const usedNames=new Set(inlineImages.map(image=>normalizeImageRef(image.filename)));
+  let remaining=MAX_MSG_ATTACHMENTS_TOTAL;
+  for(const [index,entry] of (Array.isArray(info?.attachments)?info.attachments:[]).entries()){
+    if(files.length>=40)break;
+    const cid=normalizeImageRef(entry.pidContentId||entry.contentId||'');
+    const filename=cleanHeader(entry.fileName||entry.fileNameShort||('adjunto-'+(index+1)))
+      .replace(/[";\\]/g,'_').slice(0,180);
+    if((cid&&usedCids.has(cid))||usedNames.has(normalizeImageRef(filename)))continue;
+    const knownSize=Number(entry.contentLength)||0;
+    if(knownSize>MAX_MSG_ATTACHMENT_BYTES||knownSize>remaining)continue;
+    let data;
+    try{data=reader.getAttachment(entry)}catch{/* intentar con índice */}
+    if(!data?.content){try{data=reader.getAttachment(index)}catch{/* adjunto inaccesible */}}
+    const source=data?.content;
+    const bytes=source instanceof Uint8Array?source:
+      source instanceof ArrayBuffer?new Uint8Array(source):
+      Array.isArray(source)?new Uint8Array(source):null;
+    if(!bytes?.length||bytes.length>MAX_MSG_ATTACHMENT_BYTES||bytes.length>remaining)continue;
+    remaining-=bytes.length;
+    files.push({filename,mime:attachmentMime(filename,entry.mimeType),base64:bytesBase64(bytes)});
+  }
+  return files;
+}
+function wrapMimeWithAttachments(eml,files) {
+  if(!files.length)return eml;
+  const separator='\r\n\r\n';
+  const cut=eml.indexOf(separator);
+  if(cut<0)return eml;
+  const headerLines=eml.slice(0,cut).split('\r\n');
+  const partHeaders=headerLines.filter(line=>/^content-(?:type|transfer-encoding):/i.test(line));
+  const envelope=headerLines.filter(line=>!/^content-(?:type|transfer-encoding):/i.test(line));
+  const boundary='gesmail_mixed_'+Math.random().toString(36).slice(2);
+  const lines=[...envelope,'Content-Type: multipart/mixed; boundary="'+boundary+'"','',
+    '--'+boundary,...partHeaders,'',eml.slice(cut+separator.length)];
+  for(const file of files){
+    const fallback=file.filename.replace(/[^\x20-\x7e]/g,'_');
+    const name=encodeURIComponent(file.filename);
+    lines.push('--'+boundary,
+      'Content-Type: '+file.mime+'; name="'+fallback+'"; name*=UTF-8'+"''"+name,
+      'Content-Disposition: attachment; filename="'+fallback+'"; filename*=UTF-8'+"''"+name,
+      'Content-Transfer-Encoding: base64','',
+      encodedMimeLines(file.base64));
+  }
+  lines.push('--'+boundary+'--','');
+  return lines.join('\r\n');
+}
 export function messageAsEml(info, reader) {
   const headers = String(info?.headers || '');
   const subject = cleanHeader(info?.subject || info?.normalizedSubject || fieldFromHeaders(headers, 'Subject'));
@@ -151,7 +217,7 @@ export function messageAsEml(info, reader) {
   ];
   if (!html) {
     lines.push('Content-Type: text/plain; charset=utf-8','Content-Transfer-Encoding: base64','',encodedMimeLines(utf8Base64(body)));
-    return lines.join('\r\n');
+    return wrapMimeWithAttachments(lines.join('\r\n'),msgAttachmentPayloads(info,reader,[]));
   }
   const token = Math.random().toString(36).slice(2);
   const outer = 'gesmail_related_' + token;
@@ -179,7 +245,7 @@ export function messageAsEml(info, reader) {
       encodedMimeLines(image.base64));
   }
   lines.push('--' + outer + '--','');
-  return lines.join('\r\n');
+  return wrapMimeWithAttachments(lines.join('\r\n'),msgAttachmentPayloads(info,reader,images));
 }
 async function parseMsg(file) {
   if (file.size > MAX_MSG_BYTES) throw new Error('El correo supera el límite de 35 MB.');
