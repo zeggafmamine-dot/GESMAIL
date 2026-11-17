@@ -280,10 +280,31 @@ function findThreadByReply(mail){
   return cards.find(c=>getThread(c).some(m=>m.message_id&&refs.includes(normalizeMessageId(m.message_id))))||null;
 }
 
+
+function upgradeEmailFormat(targetId,mail){
+  if(!mail.body_html)return false;
+  const row=cards.find(c=>c.id===targetId);
+  if(!row)return false;
+  let upgraded=false;
+  const thread=getThread(row).map(entry=>{
+    const matched=duplicateReason(mail,{...entry,thread:[]});
+    if(!matched||entry.body_html)return entry;
+    upgraded=true;
+    return {...entry,body_html:mail.body_html,inline_images:mail.inline_images||{},
+      body_preview:mail.body_preview||entry.body_preview};
+  });
+  if(!upgraded)return false;
+  const next=cards.map(c=>c.id===targetId?{...c,thread,updated_at:createdAt()}:c);
+  if(!persist(next))return false;
+  toast('Formato del correo actualizado: ya puedes leerlo con su firma e imágenes.','success');
+  return true;
+}
+
 function appendMailToThread(id,mail){
   const row=cards.find(c=>c.id===id);
   if(!row)return false;
   if(duplicateReason(mail,row)){
+    if(upgradeEmailFormat(id,mail))return true;
     toast('Este mensaje ya está en el hilo y no se ha añadido de nuevo.','warning');
     return false;
   }
@@ -855,6 +876,7 @@ async function processQueue(){
       catch(e){toast(`${file.name}: ${e.message}`,'error');continue}
       const result=allMatches(mail,cards.filter(c=>c.email_fingerprint||c.message_id||c.raw_sha256||getThread(c).length));
       if(result.duplicate){
+        if(upgradeEmailFormat(result.duplicate.id,mail))continue;
         toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');
         continue;
       }
