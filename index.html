@@ -341,7 +341,7 @@ function threadMatchCandidates(mail, rows) {
       // Un destinatario coincidente por sí solo no es una prueba.
       const replyPrefix=hasReplyPrefix(mail.subject||'');
       const generic=/^(rfq|request for quotation|quotation|quote|consulta|cotizacion|cotización|oferta|offer|pedido|pedido de oferta|information)$/i.test(incomingSubject);
-      const subjectIsSpecific=incomingSubject.length>=12&&incomingSubject.split(/\s+/).length>=2&&!generic;
+      const subjectIsSpecific=!generic&&(incomingSubject.length>=12||(incomingSubject.length>=7&&/\d/.test(incomingSubject)));
       // Si Outlook pierde destinatarios/CC al convertir MSG, no perder una respuesta:
       // ante un asunto específico idéntico, ofrecer revisión humana, nunca enlazar solo.
       const related=explicit ||
