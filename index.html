@@ -77,6 +77,34 @@
 #confirmHost .gesmail-confirm-actions button:focus-visible{outline:3px solid #9dc0ff;outline-offset:2px}
 @media(prefers-reduced-motion:reduce){#confirmHost .gesmail-confirm-panel{animation:none}}
 
+/* Visor de correos GESMAIL: modo lectura */
+#emailReaderHost .reader-shade{position:fixed;inset:0;z-index:4000;background:rgba(15,31,52,.64);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px}
+#emailReaderHost .reader-window{display:flex;flex-direction:column;background:#fff;width:min(1120px,100%);height:min(900px,94vh);min-height:320px;border-radius:16px;box-shadow:0 30px 90px #05152a66;overflow:hidden;color:#213650}
+#emailReaderHost .reader-top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:15px 22px;border-bottom:1px solid #e5ebf3;background:#f8faff}
+#emailReaderHost .reader-brand{font-size:11px;letter-spacing:1.25px;font-weight:850;color:#306bd2}
+#emailReaderHost .reader-top-actions{display:flex;gap:10px;align-items:center}
+#emailReaderHost .reader-top button{border:1px solid #d9e2ef;border-radius:9px;padding:8px 12px;background:#fff;color:#47627e;font-size:12px;font-weight:750}
+#emailReaderHost .reader-top button:hover{background:#eaf1ff}
+#emailReaderHost .reader-top .reader-close{font-size:19px;line-height:1;padding:6px 11px}
+#emailReaderHost .reader-header{padding:22px 29px 19px;border-bottom:1px solid #e6edf5;flex:none}
+#emailReaderHost .reader-header h2{font-size:23px;line-height:1.35;margin:0 0 20px;color:#1b314e;overflow-wrap:anywhere}
+#emailReaderHost .reader-identity{display:flex;align-items:center;gap:12px;margin-bottom:16px;min-width:0}
+#emailReaderHost .reader-avatar{width:39px;height:39px;display:grid;place-items:center;border-radius:50%;flex:none;color:#fff;background:#5279ba;font-weight:800;font-size:15px}
+#emailReaderHost .reader-from{font-weight:750;font-size:13px;overflow-wrap:anywhere}
+#emailReaderHost .reader-date{color:#8696a9;font-size:11px;margin-top:4px}
+#emailReaderHost .reader-meta{display:grid;grid-template-columns:55px minmax(0,1fr);gap:5px 10px;font-size:12px;line-height:1.5;color:#52647b}
+#emailReaderHost .reader-meta b{color:#7c8ba0;font-weight:750}
+#emailReaderHost .reader-meta span{overflow-wrap:anywhere}
+#emailReaderHost .reader-paper{padding:0;flex:1;min-height:0;background:#fff;position:relative}
+#emailReaderHost .reader-frame{width:100%;height:100%;border:0;background:#fff;display:block}
+#emailReaderHost .reader-footer{flex:none;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid #e5ebf3;background:#f8faff;padding:11px 22px;color:#7f8ea2;font-size:11px}
+#emailReaderHost .reader-footer button{background:#e9eff8;border:1px solid #d9e3f1;color:#466487;border-radius:9px;padding:8px 13px;font-weight:750;font-size:12px}
+#emailReaderHost .reader-footer button:hover{background:#dbe7fa}
+.thread-email-details .thread-mail-preview{margin:10px 0 0;color:#7c8ba0;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.thread-email-details .read-message{margin-top:13px;background:#eaf1ff;border:1px solid #cfe1ff;border-radius:9px;color:#1e62d7;font-size:12px;font-weight:800;padding:9px 13px}
+.thread-email-details .read-message:hover{background:#dce9ff}
+@media(max-width:640px){#emailReaderHost .reader-shade{padding:0}#emailReaderHost .reader-window{height:100dvh;width:100%;border-radius:0}#emailReaderHost .reader-header{padding:16px}#emailReaderHost .reader-header h2{font-size:18px;margin-bottom:13px}#emailReaderHost .reader-top{padding:12px 16px}#emailReaderHost .reader-footer{padding:10px 16px}}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -874,5 +902,6 @@ render();
 <div id="toastHost" aria-live="polite"></div>
 <div id="modalHost"></div>
 <div id="confirmHost"></div>
-<script type="module" src="./msg-support.mjs?v=rfq-thread-20261117-b"></script>
+<div id="emailReaderHost"></div>
+<script type="module" src="./msg-support.mjs?v=html-reader-20261117"></script>
 </body></html>
