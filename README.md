@@ -42,6 +42,7 @@ El sitio utiliza `index.html` directamente, con HTML, CSS y JavaScript legibles.
 1. Abre la web y pulsa **Usuarios del equipo**. Añade los nombres de tus compañeros (uno por línea). Elige tu usuario activo, si quieres usar **Mis solicitudes**.
 2. Pulsa **Cargar ejemplos** en un navegador limpio: verás dos RFQ, una de ellas con dos mensajes enlazados y personas en CC.
 3. Abre una tarjeta, rellena **Empresa** y selecciona **Propietario de la RFQ**. El remitente, asunto y CC vienen del correo importado.
+   También puedes usar **+ Añadir correo al hilo** dentro de la ficha y seleccionar archivos `.msg` o `.eml` aunque no tengan cabeceras de respuesta.
 4. Importa después una respuesta relacionada. Si incluye las cabeceras de respuesta, se añadirá al hilo automáticamente. Si no las incluye pero se parece a una RFQ existente, puedes seleccionar **Añadir al hilo de esta RFQ** en la ventana de similitud.
 5. Exporta una copia JSON con **Exportar datos** si quieres conservarla fuera de este navegador.
 
