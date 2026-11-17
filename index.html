@@ -253,6 +253,74 @@ function duplicateReason(mail,row){
   }
   return null;
 }
+
+// Detecta respuestas aunque el cuerpo cambie por completo. No interpreta el
+// porcentaje como probabilidad; es una puntuación orientativa para revisar.
+function mailParticipants(message){
+  const fields=[message?.sender,message?.to,message?.cc].join(', ');
+  const matches=fields.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)||[];
+  return new Set(matches.map(address=>address.toLowerCase()));
+}
+function threadMatchCandidates(mail, rows) {
+  const incomingSubject=normalizeSubject(mail.subject||mail.normalized_subject||'');
+  const incomingEmails=mailParticipants(mail);
+  const incomingSender=normalizeSender(mail.sender||'');
+  const incomingRefs=new Set([mail.in_reply_to,...(mail.references||[])]
+    .filter(Boolean).map(normalizeMessageId));
+  const result=[];
+  for(const row of rows){
+    if(duplicateReason(mail,row))continue;
+    const thread=getThread(row);
+    if(!thread.length)continue;
+    let best=null;
+    for(let i=0;i<thread.length;i++){
+      const current=thread[i];
+      const currentId=normalizeMessageId(current.message_id);
+      const oldRefs=[current.in_reply_to,...(current.references||[])]
+        .filter(Boolean).map(normalizeMessageId);
+      const explicit=!!(
+        (currentId&&incomingRefs.has(currentId)) ||
+        (mail.message_id&&oldRefs.includes(normalizeMessageId(mail.message_id)))
+      );
+      const oldSubject=normalizeSubject(current.subject||row.subject||'');
+      const subject=oldSubject&&incomingSubject?ratio(incomingSubject,oldSubject):0;
+      const previousEmails=mailParticipants(current);
+      const overlap=[...incomingEmails].filter(e=>previousEmails.has(e));
+      const senderLink=!!(incomingSender&&(
+        normalizeSender(current.sender||'')===incomingSender||
+        (incomingEmails.has(normalizeSender(current.sender||'')))||
+        previousEmails.has(incomingSender)));
+      const content=subject>=45||explicit?
+        ratio((mail.normalized_body||mail.body_preview||'').slice(0,2600),
+          (current.normalized_body||current.body_preview||'').slice(0,2600)):0;
+      const legacy=subject>=40?similarity(mail,current):0;
+      // Emails corporativos comunes pueden coincidir en casos independientes.
+      // Un destinatario coincidente por sí solo no es una prueba.
+      const related=explicit ||
+        (subject>=91&&incomingSubject.length>=7&&(overlap.length||senderLink||content>=38))||
+        (subject>=68&&overlap.length>0&&senderLink&&content>=25)||
+        (subject>=55&&content>=78&&overlap.length>0)||
+        (legacy>=SIMILARITY_THRESHOLD&&subject>=40);
+      if(!related)continue;
+      const reasons=[];
+      if(explicit)reasons.push('Referencias de respuesta del correo');
+      if(subject>=91)reasons.push('Mismo asunto (sin RE:/FW:)');
+      else if(subject>=68)reasons.push('Asuntos muy parecidos');
+      if(senderLink)reasons.push('Remitente relacionado con los destinatarios');
+      else if(overlap.length)reasons.push('Dirección de correo coincidente');
+      if(content>=48)reasons.push('Contenido de los mensajes parecido');
+      const score=explicit?100:Math.min(96,Math.round(
+        subject*.58+(senderLink?25:overlap.length?16:0)+content*.16+
+        (legacy>=76?6:0)));
+      const candidate={row,score,reasons,anchor:current,anchorIndex:i,explicit};
+      if(!best||candidate.score>best.score||
+        (candidate.score===best.score&&candidate.explicit&&!best.explicit))best=candidate;
+    }
+    if(best)result.push(best);
+  }
+  return result.sort((a,b)=>b.score-a.score).slice(0,5);
+}
+
 function allMatches(mail, rows) {
   const duplicate = rows.find(row=>duplicateReason(mail,row));
   if (duplicate) return { duplicate, reason: duplicateReason(mail, duplicate), similar: [] };
@@ -1424,12 +1492,8 @@ async function processQueue(){
         toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');
         continue;
       }
-      const replyTarget=findThreadByReply(mail);
-      if(replyTarget){
-        await appendMailToThread(replyTarget.id,mail);
-        continue;
-      }
-      if(result.similar.length){showSimilarity(mail,result.similar);return}
+      const candidates=threadMatchCandidates(mail,cards);
+      if(candidates.length){showSimilarity(mail,candidates);return}
       await addMail(mail);
     }
   }finally{isBusy=false}
