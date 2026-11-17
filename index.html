@@ -105,6 +105,39 @@
 .thread-email-details .read-message:hover{background:#dce9ff}
 @media(max-width:640px){#emailReaderHost .reader-shade{padding:0}#emailReaderHost .reader-window{height:100dvh;width:100%;border-radius:0}#emailReaderHost .reader-header{padding:16px}#emailReaderHost .reader-header h2{font-size:18px;margin-bottom:13px}#emailReaderHost .reader-top{padding:12px 16px}#emailReaderHost .reader-footer{padding:10px 16px}}
 
+/* Lector Outlook - herramientas, navegación y firma a ancho original */
+#emailReaderHost .reader-window{width:min(1360px,100%);height:min(940px,96vh)}
+#emailReaderHost .reader-window.is-expanded{width:100%;height:100%;border-radius:0}
+#emailReaderHost .reader-top{gap:14px;min-height:50px}
+#emailReaderHost .reader-brand{margin-right:auto;font-size:13px;letter-spacing:.1px}
+#emailReaderHost .reader-readonly{color:#53718f;background:#e6eef9;border:1px solid #d5e3f5;border-radius:20px;font-size:10px;padding:4px 9px;font-weight:770}
+#emailReaderHost .reader-top-actions{display:flex;align-items:center;gap:7px}
+#emailReaderHost .reader-action{background:#fff;border:1px solid #d9e2ef;color:#41617d;font-size:12px;font-weight:720;border-radius:8px;min-height:34px;padding:7px 11px}
+#emailReaderHost .reader-action:hover:not(:disabled){background:#e8f1ff;color:#205ed4}
+#emailReaderHost .reader-action:disabled{opacity:.4;cursor:not-allowed}
+#emailReaderHost .reader-action:focus-visible{outline:3px solid #9dc0ff;outline-offset:2px}
+#emailReaderHost .reader-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #e9eef5;padding:9px 21px;background:#fff}
+#emailReaderHost .reader-nav,#emailReaderHost .reader-view-options{display:flex;align-items:center;gap:8px}
+#emailReaderHost .reader-position{font-size:11px;color:#7389a2;font-weight:760;white-space:nowrap}
+#emailReaderHost .reader-zoom-value{min-width:44px;font-size:12px;color:#375b7f;font-weight:780;text-align:center}
+#emailReaderHost .reader-separator{height:23px;width:1px;background:#dfe7f2;margin:0 4px}
+#emailReaderHost .reader-alert{padding:9px 26px;background:#fff9e9;color:#815e29;border-bottom:1px solid #f3e7ca;font-size:12px;line-height:1.5}
+#emailReaderHost .reader-alert[hidden]{display:none}
+#emailReaderHost .reader-paper{overflow:auto;scrollbar-gutter:stable}
+#emailReaderHost .reader-frame{min-width:760px}
+#emailReaderHost .reader-footer .reader-origin{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#emailReaderHost .reader-footer .reader-action{min-width:70px}
+@media(max-width:800px){
+ #emailReaderHost .reader-shade{padding:0}
+ #emailReaderHost .reader-window{width:100%;height:100dvh;border-radius:0}
+ #emailReaderHost .reader-toolbar{padding:8px 12px;flex-wrap:wrap}
+ #emailReaderHost .reader-header{padding:14px 17px}
+ #emailReaderHost .reader-header h2{font-size:18px;margin-bottom:12px}
+ #emailReaderHost .reader-brand{font-size:11px}
+ #emailReaderHost .reader-readonly,#emailReaderHost .reader-fullscreen{display:none}
+}
+@media(max-width:460px){#emailReaderHost .reader-top{padding:9px}#emailReaderHost .reader-top .reader-remote{max-width:120px;white-space:normal;padding:5px 7px}#emailReaderHost .reader-toolbar{gap:8px}#emailReaderHost .reader-view-options{gap:4px}#emailReaderHost .reader-action{font-size:11px;padding:6px 8px}}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -433,8 +466,8 @@ function makeModal(title,subtitle,body,actions,eyebrow='DETALLE DE RFQ'){
 /** Vista fiel al HTML de Outlook: no sustituir tablas, fuentes ni anchos de las firmas.
  * Todo el correo se representa en un iframe aislado, sin JS y sin edición.
  */
-function buildEmailDocument(message,allowRemoteImages=false){
-  const html=String(message.body_html||'');
+function buildEmailDocument(message,allowRemoteImages=false,zoom=100,asText=false){
+  const html=asText?'':String(message.body_html||'');
   const doc=new DOMParser().parseFromString(html||'<html><body><pre class="gesmail-plain"></pre></body></html>','text/html');
   if(!html)doc.querySelector('.gesmail-plain').textContent=message.body_preview||'El cuerpo de este mensaje no está disponible.';
   const images=message.inline_images&&typeof message.inline_images==='object'?message.inline_images:{};
@@ -533,50 +566,142 @@ function buildEmailDocument(message,allowRemoteImages=false){
   doc.head.prepend(noReferrer);
   doc.head.prepend(utf8);
   doc.head.prepend(secure);
+  doc.documentElement.style.zoom=String(zoom/100);
   return '<!DOCTYPE html>'+doc.documentElement.outerHTML;
 }
-function showEmailReader(message,defaultSubject=''){
+
+function showEmailReader(message,defaultSubject='',conversation=null,startIndex=0){
   const host=$('emailReaderHost');
+  if(!host)return;
   host.replaceChildren();
   const previousFocus=document.activeElement;
-  const backdrop=document.createElement('div');
-  backdrop.className='reader-shade';
-  backdrop.innerHTML='<section class="reader-window" role="dialog" aria-modal="true" aria-labelledby="gesmail-reader-subject">'+
-    '<div class="reader-top"><span class="reader-brand">GESMAIL · LECTOR DE CORREO</span>'+
-    '<div class="reader-top-actions"><button type="button" class="reader-remote">Mostrar imágenes externas</button>'+
-    '<button type="button" class="reader-close" aria-label="Cerrar lector">×</button></div></div>'+
-    '<div class="reader-header"><h2 id="gesmail-reader-subject"></h2>'+
-    '<div class="reader-identity"><span class="reader-avatar" aria-hidden="true"></span>'+
-    '<div><div class="reader-from"></div><div class="reader-date"></div></div></div>'+
-    '<div class="reader-meta"><b>Para:</b><span class="reader-to"></span><b>CC:</b><span class="reader-cc"></span></div></div>'+
-    '<div class="reader-paper"><iframe class="reader-frame" title="Contenido del correo (solo lectura)" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe></div>'+
-    '<div class="reader-footer"><span>Correo original · Solo lectura · Sin posibilidad de edición</span><button type="button" class="reader-close">Cerrar</button></div></section>';
-  backdrop.querySelector('#gesmail-reader-subject').textContent=message.subject||defaultSubject||'Sin asunto';
-  backdrop.querySelector('.reader-from').textContent=message.sender||'Remitente no disponible';
-  backdrop.querySelector('.reader-avatar').textContent=(message.sender||'?').replace(/^[<\s]+/,'').charAt(0).toUpperCase();
-  backdrop.querySelector('.reader-date').textContent=longDate(message.email_date||message.imported_at);
-  backdrop.querySelector('.reader-to').textContent=message.to||'No consta';
-  backdrop.querySelector('.reader-cc').textContent=message.cc||'Sin personas en copia';
-  const frame=backdrop.querySelector('iframe');
-  const remoteBtn=backdrop.querySelector('.reader-remote');
-  remoteBtn.hidden=!/(?:src|background)\s*=\s*["']?https?:\/\/|url\(\s*["']?https?:\/\//i.test(message.body_html||'');
-  let showRemote=false;
-  const renderFrame=()=>{frame.srcdoc=buildEmailDocument(message,showRemote)};
-  renderFrame();
-  remoteBtn.onclick=()=>{showRemote=!showRemote;renderFrame();remoteBtn.textContent=showRemote?'Ocultar imágenes externas':'Mostrar imágenes externas'};
+  const thread=Array.isArray(conversation)&&conversation.length?conversation:[message];
+  let selectedIndex=Math.max(0,Math.min(thread.length-1,Number(startIndex)||0));
+  let zoom=100,asText=false,allowRemote=false,expanded=false,closed=false;
+  const shade=document.createElement('div');
+  shade.className='reader-shade';
+  shade.innerHTML=[
+    '<section class="reader-window" role="dialog" aria-modal="true" aria-labelledby="gesmail-reader-subject">',
+      '<div class="reader-top"><span class="reader-brand">✉ GESMAIL · Lector de correo</span>',
+      '<span class="reader-readonly">Solo lectura</span>',
+      '<div class="reader-top-actions">',
+        '<button type="button" class="reader-action reader-remote">Mostrar imágenes externas</button>',
+        '<button type="button" class="reader-action reader-fullscreen" title="Ampliar o restaurar lector">⛶</button>',
+        '<button type="button" class="reader-action reader-close" aria-label="Cerrar lector">×</button>',
+      '</div></div>',
+      '<div class="reader-toolbar"><div class="reader-nav">',
+        '<button type="button" class="reader-action reader-prev" aria-label="Correo anterior">‹ Anterior</button>',
+        '<span class="reader-position"></span>',
+        '<button type="button" class="reader-action reader-next" aria-label="Correo siguiente">Siguiente ›</button>',
+      '</div><div class="reader-view-options">',
+        '<button type="button" class="reader-action reader-format">Ver texto</button>',
+        '<span class="reader-separator"></span>',
+        '<button type="button" class="reader-action reader-zoom-out" aria-label="Reducir zoom">−</button>',
+        '<span class="reader-zoom-value">100%</span>',
+        '<button type="button" class="reader-action reader-zoom-in" aria-label="Aumentar zoom">+</button>',
+        '<button type="button" class="reader-action reader-reset" title="Zoom original">Restablecer</button>',
+      '</div></div>',
+      '<div class="reader-header"><h2 id="gesmail-reader-subject"></h2>',
+        '<div class="reader-identity"><span class="reader-avatar" aria-hidden="true"></span>',
+          '<div><div class="reader-from"></div><div class="reader-date"></div></div></div>',
+        '<div class="reader-meta"><b>Para:</b><span class="reader-to"></span>',
+          '<b>CC:</b><span class="reader-cc"></span></div>',
+      '</div>',
+      '<div class="reader-alert" role="note" hidden></div>',
+      '<div class="reader-paper"><iframe class="reader-frame" title="Mensaje original en solo lectura"',
+        ' sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe></div>',
+      '<div class="reader-footer"><span class="reader-origin"></span>',
+        '<button type="button" class="reader-action reader-close">Cerrar</button></div>',
+    '</section>'
+  ].join('');
+  const panel=shade.querySelector('.reader-window');
+  const frame=shade.querySelector('.reader-frame');
+  const remoteButton=shade.querySelector('.reader-remote');
+  const formatButton=shade.querySelector('.reader-format');
+  const prev=shade.querySelector('.reader-prev');
+  const next=shade.querySelector('.reader-next');
+  const notice=shade.querySelector('.reader-alert');
+  const currentMail=()=>thread[selectedIndex]||message;
+  function missingCidImages(mail){
+    const embedded=mail.inline_images||{};
+    const refs=[...String(mail.body_html||'').matchAll(/cid:([^'"\s>)]+)/gi)];
+    return refs.filter(match=>{
+      let cid=match[1].replace(/^<|>$/g,'').toLowerCase();
+      try{cid=decodeURIComponent(cid)}catch {/* sin cambios */}
+      return !embedded[cid];
+    }).length;
+  }
+  const usesRemoteImages=mail=>/(?:src|background)\s*=\s*["']?https?:\/\/|url\(\s*["']?https?:\/\//i.test(mail.body_html||'');
+  function refresh(){
+    const current=currentMail();
+    shade.querySelector('#gesmail-reader-subject').textContent=current.subject||defaultSubject||'Sin asunto';
+    shade.querySelector('.reader-from').textContent=current.sender||'Remitente no disponible';
+    shade.querySelector('.reader-avatar').textContent=(current.sender||'?').trim().charAt(0).toUpperCase();
+    const date=new Date(current.email_date||current.imported_at||'');
+    shade.querySelector('.reader-date').textContent=Number.isNaN(date.getTime())?'Fecha no disponible':
+      date.toLocaleString('es-ES',{dateStyle:'full',timeStyle:'short'});
+    shade.querySelector('.reader-to').textContent=current.to||'No consta';
+    shade.querySelector('.reader-cc').textContent=current.cc||'Sin personas en copia';
+    shade.querySelector('.reader-position').textContent=thread.length>1?
+      'Mensaje '+(selectedIndex+1)+' de '+thread.length:'1 mensaje';
+    prev.disabled=selectedIndex===0;
+    next.disabled=selectedIndex===thread.length-1;
+    remoteButton.hidden=!usesRemoteImages(current);
+    remoteButton.textContent=allowRemote?'Ocultar imágenes externas':'Mostrar imágenes externas';
+    formatButton.textContent=asText?'Ver formato original':'Ver texto';
+    formatButton.setAttribute('aria-pressed',String(asText));
+    shade.querySelector('.reader-zoom-value').textContent=zoom+'%';
+    const missing=missingCidImages(current);
+    let message='';
+    if(missing)message='Hay '+missing+' imágenes incrustadas que no se han podido recuperar. Reimporta el archivo .msg o .eml original para mejorar la firma.';
+    else if(!allowRemote&&usesRemoteImages(current))message='Las imágenes alojadas fuera del correo están bloqueadas por privacidad. Puedes activarlas desde “Mostrar imágenes externas”.';
+    notice.textContent=message;
+    notice.hidden=!message;
+    shade.querySelector('.reader-origin').textContent=(current.original_filename||'Correo importado')+
+      ' · Solo lectura, sin edición ni envío';
+    frame.srcdoc=buildEmailDocument(current,allowRemote,zoom,asText);
+    const paper=shade.querySelector('.reader-paper');
+    paper.scrollTop=0;paper.scrollLeft=0;
+  }
+  function navigate(index){
+    if(index<0||index>=thread.length)return;
+    selectedIndex=index;allowRemote=false;asText=false;
+    refresh();
+  }
   function close(){
+    if(closed)return;
+    closed=true;
     document.removeEventListener('keydown',onKey,true);
     host.replaceChildren();
-    if(previousFocus?.isConnected)previousFocus.focus();
+    if(previousFocus?.isConnected&&typeof previousFocus.focus==='function')previousFocus.focus();
   }
-  function onKey(event){
-    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
+  function onKey(e){
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}
+    if(e.key==='Tab'){
+      const buttons=[...panel.querySelectorAll('button:not([disabled]):not([hidden])')]
+        .filter(b=>getComputedStyle(b).display!=='none');
+      if(!buttons.length)return;
+      if(e.shiftKey&&document.activeElement===buttons[0]){e.preventDefault();buttons[buttons.length-1].focus();}
+      else if(!e.shiftKey&&document.activeElement===buttons[buttons.length-1]){e.preventDefault();buttons[0].focus();}
+    }
   }
-  backdrop.querySelectorAll('.reader-close').forEach(btn=>btn.addEventListener('click',close));
-  backdrop.addEventListener('mousedown',event=>{if(event.target===backdrop)close()});
-  host.append(backdrop);
+  prev.onclick=()=>navigate(selectedIndex-1);
+  next.onclick=()=>navigate(selectedIndex+1);
+  remoteButton.onclick=()=>{allowRemote=!allowRemote;refresh()};
+  formatButton.onclick=()=>{asText=!asText;refresh()};
+  shade.querySelector('.reader-zoom-out').onclick=()=>{zoom=Math.max(60,zoom-10);refresh()};
+  shade.querySelector('.reader-zoom-in').onclick=()=>{zoom=Math.min(160,zoom+10);refresh()};
+  shade.querySelector('.reader-reset').onclick=()=>{zoom=100;refresh()};
+  shade.querySelector('.reader-fullscreen').onclick=()=>{
+    expanded=!expanded;
+    panel.classList.toggle('is-expanded',expanded);
+  };
+  shade.querySelectorAll('.reader-close').forEach(button=>button.addEventListener('click',close));
+  shade.addEventListener('mousedown',e=>{if(e.target===shade)close()});
+  host.append(shade);
   document.addEventListener('keydown',onKey,true);
-  backdrop.querySelector('.reader-close').focus();
+  refresh();
+  shade.querySelector('.reader-close').focus();
 }
 
 function openCard(id){
@@ -621,7 +746,7 @@ function openCard(id){
   <div class="history"><b>Historial de la RFQ</b><ul>${(c.history||[]).slice().reverse().map(h=>`<li>${esc(h.event)} · ${esc(longDate(h.at))}</li>`).join('')}</ul></div>`;
   makeModal(c.subject,c.client||'Ficha de solicitud de oferta',body,'<button id="deleteCardBtn" type="button" class="danger delete-business">Borrar negocio</button><button class="secondary" data-close>Cancelar</button><button id="saveCardBtn" class="primary">Guardar cambios</button>');
   $('deleteCardBtn').onclick=()=>deleteCard(id);
-  $('modalHost').querySelectorAll('[data-read-message]').forEach(button=>button.addEventListener('click',()=>showEmailReader(thread[Number(button.dataset.readMessage)],c.subject)));
+  $('modalHost').querySelectorAll('[data-read-message]').forEach(button=>button.addEventListener('click',()=>showEmailReader(thread[Number(button.dataset.readMessage)],c.subject,thread,Number(button.dataset.readMessage))));
 
   const threadFileInput=$('threadMailInput');
   $('addThreadMailBtn').onclick=()=>threadFileInput.click();
