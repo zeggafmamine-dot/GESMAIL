@@ -169,40 +169,226 @@ function sendToOriginalImporter(files) {
  * Mantiene los avisos y las acciones existentes, pero los sitúa
  * en el centro de la pantalla, también en móviles.
  */
+/**
+ * Convierte los avisos del tablero en tarjetas visuales sin cambiar la función
+ * toast() original ni su detección de duplicados o temporizador de cierre.
+ */
+function upgradeToast(toast) {
+  if (!toast || toast.dataset.gesmailPopup === 'true') return;
+  toast.dataset.gesmailPopup = 'true';
+  toast.classList.add('gesmail-popup');
+  toast.setAttribute('role', 'status');
+
+  const messageText = toast.querySelector('span')?.textContent || toast.textContent || '';
+  const rawMessage = toast.querySelector('span');
+  const originalButton = toast.querySelector('button');
+  const isDuplicate = /duplicad[oa]|message-id idéntico|message-id identico/i.test(messageText);
+  const isSimilar = /similitud|parecid[oa]|similar/i.test(messageText);
+  const kind = toast.classList.contains('error') ? 'error'
+    : toast.classList.contains('success') ? 'success'
+    : toast.classList.contains('warning') ? 'warning' : 'info';
+
+  const title = isDuplicate ? 'Duplicado detectado'
+    : isSimilar ? 'Correo similar detectado'
+    : kind === 'warning' ? 'Atención'
+    : kind === 'error' ? 'No se pudo completar'
+    : kind === 'success' ? 'Operación completada' : 'Notificación';
+
+  const icon = document.createElement('div');
+  icon.className = 'gesmail-popup-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = kind === 'success' ? '✓' : kind === 'error' ? '×'
+    : kind === 'warning' ? '!' : 'i';
+
+  const content = document.createElement('div');
+  content.className = 'gesmail-popup-content';
+
+  const heading = document.createElement('div');
+  heading.className = 'gesmail-popup-heading';
+  heading.textContent = title;
+
+  const message = rawMessage || document.createElement('span');
+  if (!rawMessage) message.textContent = messageText;
+  message.className = 'gesmail-popup-message';
+
+  const actions = document.createElement('div');
+  actions.className = 'gesmail-popup-actions';
+  const close = originalButton || document.createElement('button');
+  close.className = 'gesmail-popup-close';
+  close.type = 'button';
+  close.textContent = 'Entendido';
+  close.setAttribute('aria-label', 'Cerrar aviso');
+  // El botón original conserva su onclick. Los avisos del lector MSG
+  // carecen de botón, por lo que añadimos un cierre en esos casos.
+  if (!originalButton) close.addEventListener('click', () => toast.remove());
+
+  toast.replaceChildren();
+  actions.appendChild(close);
+  content.append(heading, message, actions);
+  toast.append(icon, content);
+}
+
 function centerToastNotifications() {
-  if (document.getElementById('gesmailCenteredToasts')) return;
+  if (document.getElementById('gesmailPopupStyle')) return;
   const style = document.createElement('style');
-  style.id = 'gesmailCenteredToasts';
+  style.id = 'gesmailPopupStyle';
   style.textContent = `
-    #toastHost {
+    html body #toastHost {
+      position: static !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      width: auto !important;
+      max-width: none !important;
+      max-height: none !important;
+      overflow: visible !important;
+      display: block !important;
+      padding: 0 !important;
+      pointer-events: none !important;
+    }
+
+    html body #toastHost:has(> .toast.gesmail-popup)::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 2147483598;
+      background: rgba(15, 23, 42, .14);
+      pointer-events: none;
+    }
+
+    html body #toastHost > .toast.gesmail-popup {
+      --popup-accent: #2563eb;
+      --popup-light: #eaf2ff;
       position: fixed !important;
       top: 50% !important;
       left: 50% !important;
       right: auto !important;
       bottom: auto !important;
       transform: translate(-50%, -50%) !important;
-      width: min(92vw, 540px) !important;
-      max-width: calc(100vw - 24px) !important;
-      max-height: 80vh !important;
-      padding: 0 !important;
-      display: flex !important;
-      flex-direction: column !important;
-      justify-content: center !important;
-      align-items: stretch !important;
-      gap: 12px !important;
-      overflow-y: auto !important;
       z-index: 2147483600 !important;
-      pointer-events: none !important;
-    }
-    #toastHost .toast {
-      box-sizing: border-box;
-      width: 100% !important;
-      max-width: 100% !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      align-items: flex-start !important;
+      gap: 16px !important;
+      width: min(460px, calc(100vw - 32px)) !important;
+      max-width: calc(100vw - 32px) !important;
+      max-height: min(80vh, 640px) !important;
       margin: 0 !important;
+      padding: 22px !important;
+      overflow-y: auto !important;
+      border-radius: 18px !important;
+      border: 1px solid #e4eaf2 !important;
+      background: #fff !important;
+      color: #1f2937 !important;
+      box-shadow: 0 22px 65px rgba(16, 32, 56, .24) !important;
+      font: 400 13px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif !important;
       pointer-events: auto !important;
+      animation: gesmailPopupAppear .2s ease-out both;
+    }
+
+    html body #toastHost > .toast.gesmail-popup.warning {
+      --popup-accent: #b7791f;
+      --popup-light: #fff3d9;
+    }
+
+    html body #toastHost > .toast.gesmail-popup.error {
+      --popup-accent: #dc3545;
+      --popup-light: #fde9eb;
+    }
+
+    html body #toastHost > .toast.gesmail-popup.success {
+      --popup-accent: #148657;
+      --popup-light: #e4f7ee;
+    }
+
+    #toastHost .gesmail-popup-icon {
+      flex: 0 0 46px;
+      width: 46px;
+      height: 46px;
+      box-sizing: border-box;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      background: var(--popup-light);
+      color: var(--popup-accent);
+      font-size: 23px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    #toastHost .gesmail-popup-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #toastHost .gesmail-popup-heading {
+      padding-top: 1px;
+      margin-bottom: 8px;
+      font-size: 16px;
+      line-height: 1.3;
+      font-weight: 750;
+      color: #182c45;
+    }
+
+    #toastHost .gesmail-popup-message {
+      display: block;
+      font-size: 13px;
+      line-height: 1.65;
+      color: #526276;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    #toastHost .gesmail-popup-actions {
+      margin-top: 18px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    html body #toastHost .gesmail-popup-close {
+      margin: 0 !important;
+      padding: 9px 18px !important;
+      border: 0 !important;
+      border-radius: 10px !important;
+      background: #2468e8 !important;
+      color: #fff !important;
+      font-size: 12px !important;
+      line-height: 1.4 !important;
+      font-weight: 700 !important;
+      cursor: pointer;
+    }
+
+    html body #toastHost .gesmail-popup-close:hover {
+      background: #1d58cb !important;
+    }
+
+    html body #toastHost .gesmail-popup-close:focus-visible {
+      outline: 3px solid #93baff !important;
+      outline-offset: 3px;
+    }
+
+    @keyframes gesmailPopupAppear {
+      from { opacity: 0; translate: 0 12px; scale: .97; }
+      to { opacity: 1; translate: 0 0; scale: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html body #toastHost > .toast.gesmail-popup { animation: none !important; }
     }
   `;
   document.head.appendChild(style);
+
+  const host = document.getElementById('toastHost');
+  if (!host) return;
+  const process = () => {
+    Array.from(host.children).forEach(element => {
+      if (element.classList?.contains('toast')) upgradeToast(element);
+    });
+  };
+  process();
+  new MutationObserver(process).observe(host, { childList: true });
 }
 
 export function enableMsgSupport() {
