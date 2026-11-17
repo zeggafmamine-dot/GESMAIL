@@ -95,8 +95,8 @@
 #emailReaderHost .reader-meta{display:grid;grid-template-columns:55px minmax(0,1fr);gap:5px 10px;font-size:12px;line-height:1.5;color:#52647b}
 #emailReaderHost .reader-meta b{color:#7c8ba0;font-weight:750}
 #emailReaderHost .reader-meta span{overflow-wrap:anywhere}
-#emailReaderHost .reader-paper{padding:0;flex:1;min-height:0;background:#fff;position:relative}
-#emailReaderHost .reader-frame{width:100%;height:100%;border:0;background:#fff;display:block}
+#emailReaderHost .reader-paper{padding:0;flex:1;min-height:0;background:#fff;position:relative;overflow:auto}
+#emailReaderHost .reader-frame{width:100%;min-width:760px;height:100%;border:0;background:#fff;display:block}
 #emailReaderHost .reader-footer{flex:none;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid #e5ebf3;background:#f8faff;padding:11px 22px;color:#7f8ea2;font-size:11px}
 #emailReaderHost .reader-footer button{background:#e9eff8;border:1px solid #d9e3f1;color:#466487;border-radius:9px;padding:8px 13px;font-weight:750;font-size:12px}
 #emailReaderHost .reader-footer button:hover{background:#dbe7fa}
@@ -424,24 +424,64 @@ function makeModal(title,subtitle,body,actions,eyebrow='DETALLE DE RFQ'){
   const first=overlay.querySelector('input,select,button');first?.focus();
 }
 
+
+/** Vista fiel al HTML de Outlook: no sustituir tablas, fuentes ni anchos de las firmas.
+ * Todo el correo se representa en un iframe aislado, sin JS y sin edición.
+ */
 function buildEmailDocument(message,allowRemoteImages=false){
   const html=String(message.body_html||'');
-  const content=new DOMParser().parseFromString(html||'<html><body><pre></pre></body></html>','text/html');
-  if(!html)content.querySelector('pre').textContent=message.body_preview||'El cuerpo no está disponible.';
-  const styles=[...content.head.querySelectorAll('style')]
-    .map(x=>x.textContent.slice(0,30000)).slice(0,15).join('\n').replace(/<\//g,'<\\/');
-  content.querySelectorAll('script,noscript,iframe,frame,frameset,object,embed,applet,meta,link,base,form,input,textarea,select,button,video,audio,svg,math,canvas,template').forEach(el=>el.remove());
+  const doc=new DOMParser().parseFromString(html||'<html><body><pre class="gesmail-plain"></pre></body></html>','text/html');
+  if(!html)doc.querySelector('.gesmail-plain').textContent=message.body_preview||'El cuerpo de este mensaje no está disponible.';
   const images=message.inline_images&&typeof message.inline_images==='object'?message.inline_images:{};
-  const cidValue=value=>{
-    try{return decodeURIComponent(value).replace(/^<|>$/g,'').trim().toLowerCase()}
-    catch{return value.replace(/^<|>$/g,'').trim().toLowerCase()}
+  const normalizeCid=value=>{
+    let ref=String(value||'').trim().replace(/^cid:/i,'').replace(/^<|>$/g,'');
+    try{ref=decodeURIComponent(ref)}catch {/* CID válido sin codificación */}
+    return ref.toLowerCase();
   };
-  content.body.querySelectorAll('*').forEach(el=>{
+  const cidSource=value=>images[normalizeCid(value)]||'';
+  const safeSource=source=>{
+    const value=String(source||'').trim();
+    if(/^cid:/i.test(value))return cidSource(value);
+    if(/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)&&value.length<=1800000)return value;
+    if(allowRemoteImages&&/^https?:\/\//i.test(value))return value;
+    return '';
+  };
+  const replaceCssImages=css=>String(css||'').replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (whole,quote,value)=>{
+    const ref=value.trim();
+    if(!/^cid:/i.test(ref))return whole;
+    const resolved=safeSource(ref);
+    return resolved?'url("'+resolved+'")':'none';
+  });
+  // Compatibilidad con firmas que utilizan VML de Microsoft Word / Outlook.
+  // Convertir imágenes VML sin duplicar un <img> HTML que ya exista.
+  [...doc.getElementsByTagName('v:imagedata')].forEach(vml=>{
+    const src=vml.getAttribute('src')||vml.getAttribute('o:href')||'';
+    if(!src||!safeSource(src))return;
+    const holder=vml.parentElement;
+    if(holder?.querySelector('img'))return;
+    const image=doc.createElement('img');
+    image.setAttribute('src',src);
+    image.setAttribute('alt',vml.getAttribute('title')||'');
+    const size=holder?.getAttribute('style')||'';
+    const width=size.match(/(?:^|;)\s*width\s*:\s*([\d.]+)(pt|px)/i);
+    if(width)image.setAttribute('style','width:'+width[1]+width[2]);
+    vml.replaceWith(image);
+  });
+  doc.querySelectorAll('script,noscript,iframe,frame,frameset,object,embed,applet,link,base,form,input,textarea,select,button,video,audio,svg,math,canvas,template').forEach(el=>el.remove());
+  // Ignorar metadatos originales capaces de refrescar/navegar la ventana.
+  doc.querySelectorAll('meta').forEach(el=>el.remove());
+  doc.querySelectorAll('*').forEach(el=>{
     for(const attribute of [...el.attributes]){
       const name=attribute.name.toLowerCase();
       if(name.startsWith('on')||['contenteditable','srcdoc','srcset','formaction','autofocus','ping','integrity'].includes(name)){
         el.removeAttribute(attribute.name);
       }
+    }
+    if(el.hasAttribute('style')){
+      el.setAttribute('style',replaceCssImages(el.getAttribute('style')));
+    }
+    if(el.tagName==='STYLE'){
+      el.textContent=replaceCssImages(el.textContent);
     }
     if(el.tagName==='A'){
       const href=el.getAttribute('href')||'';
@@ -449,29 +489,46 @@ function buildEmailDocument(message,allowRemoteImages=false){
       else {el.setAttribute('target','_blank');el.setAttribute('rel','noopener noreferrer nofollow');}
     }
     if(el.tagName==='IMG'){
-      const original=(el.getAttribute('src')||'').trim();
-      let source='';
-      if(/^cid:/i.test(original))source=images[cidValue(original.slice(4))]||'';
-      else if(/^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(original)&&original.length<700000)source=original;
-      else if(allowRemoteImages&&/^https?:\/\//i.test(original))source=original;
+      const original=el.getAttribute('src')||'';
+      const source=safeSource(original);
       if(source)el.setAttribute('src',source);
-      else {el.removeAttribute('src');if(!el.getAttribute('alt'))el.setAttribute('alt',/^https?:/i.test(original)?'Imagen externa bloqueada':'Imagen no disponible');}
+      else {
+        el.removeAttribute('src');
+        if(!el.getAttribute('alt'))el.setAttribute('alt',/^https?:/i.test(original)?'Imagen externa bloqueada':'Imagen de firma no disponible');
+      }
       el.removeAttribute('srcset');
       el.setAttribute('loading','lazy');
+    }else if(el.hasAttribute('src')){
+      el.removeAttribute('src');
     }
-    if(el.tagName!=='IMG'&&el.hasAttribute('src'))el.removeAttribute('src');
-    if(el.hasAttribute('background'))el.removeAttribute('background');
+    if(el.hasAttribute('background')){
+      const background=safeSource(el.getAttribute('background'));
+      if(background)el.setAttribute('style',(el.getAttribute('style')||'')+';background-image:url("'+background+'")');
+      el.removeAttribute('background');
+    }
   });
-  const docStyle='<style>html{font-family:Arial,"Segoe UI",sans-serif;color:#1f2937;background:#fff;font-size:14px}'+
-    'body{margin:0;padding:25px 28px;line-height:1.52;overflow-wrap:anywhere;min-width:0}'+
-    'img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 Arial,sans-serif}'+
-    'a{color:#1767c3}@media(max-width:600px){body{padding:16px}}</style>';
-  const policy="default-src 'none'; img-src data:"+(allowRemoteImages?' https: http:':'')+
+  const csp="default-src 'none'; img-src data:"+(allowRemoteImages?' https: http:':'')+
     "; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; connect-src 'none'; object-src 'none';";
-  const meta='<meta http-equiv="Content-Security-Policy" content="'+policy+'">';
-  return '<!DOCTYPE html><html><head><meta charset="utf-8">'+meta+
-    '<meta name="referrer" content="no-referrer">'+docStyle+'<style>'+styles+'</style></head><body>'+
-    content.body.innerHTML+'</body></html>';
+  const secure=doc.createElement('meta');
+  secure.setAttribute('http-equiv','Content-Security-Policy');
+  secure.setAttribute('content',csp);
+  const utf8=doc.createElement('meta');
+  utf8.setAttribute('charset','utf-8');
+  const noReferrer=doc.createElement('meta');
+  noReferrer.setAttribute('name','referrer');
+  noReferrer.setAttribute('content','no-referrer');
+  const defaults=doc.createElement('style');
+  // A diferencia del antiguo visor, NO aplicar max-width a las imágenes,
+  // border-collapse a las tablas, ni overflow-wrap:anywhere al cuerpo:
+  // las firmas con tablas de anchura fija se mantienen como en Outlook.
+  defaults.textContent='html{background:#fff}body{margin:0;padding:20px 26px;font-family:Arial,"Segoe UI",sans-serif;font-size:14px;}'+
+    '.gesmail-plain{font:14px/1.6 "Segoe UI",Arial,sans-serif;white-space:pre-wrap;overflow-wrap:break-word}'+
+    '@media(max-width:600px){body{padding:12px}}';
+  doc.head.prepend(defaults);
+  doc.head.prepend(noReferrer);
+  doc.head.prepend(utf8);
+  doc.head.prepend(secure);
+  return '<!DOCTYPE html>'+doc.documentElement.outerHTML;
 }
 function showEmailReader(message,defaultSubject=''){
   const host=$('emailReaderHost');
@@ -497,7 +554,7 @@ function showEmailReader(message,defaultSubject=''){
   backdrop.querySelector('.reader-cc').textContent=message.cc||'Sin personas en copia';
   const frame=backdrop.querySelector('iframe');
   const remoteBtn=backdrop.querySelector('.reader-remote');
-  remoteBtn.hidden=!/https?:\/\//i.test(message.body_html||'');
+  remoteBtn.hidden=!/(?:src|background)\s*=\s*["']?https?:\/\/|url\(\s*["']?https?:\/\//i.test(message.body_html||'');
   let showRemote=false;
   const renderFrame=()=>{frame.srcdoc=buildEmailDocument(message,showRemote)};
   renderFrame();
