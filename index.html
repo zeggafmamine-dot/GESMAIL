@@ -163,6 +163,9 @@
 @media(max-width:600px){#emailReaderHost .reader-attachments{padding:10px 13px}#emailReaderHost .reader-attachment-item{min-width:0}#emailReaderHost .reader-attachment-actions{flex-direction:column}}
 
 /* Comparador de posibles hilos: correos originales enfrentados y confirmación manual */
+/* Elevar el comparador por encima de los avisos centrados (z-index 2000). */
+#modalHost .overlay:has(.thread-compare-dialog){z-index:2500}
+
 .thread-compare-dialog{width:min(1190px,100%)!important;max-height:min(96vh,1080px)!important;display:flex;flex-direction:column;overflow:hidden!important}
 .thread-compare-dialog .dialog-head{padding:14px 22px 12px;flex:none}
 .thread-compare-dialog .dialog-head h2{font-size:20px}
