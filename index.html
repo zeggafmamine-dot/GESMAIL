@@ -36,6 +36,8 @@
 .rfq-summary-field small{display:block;font-size:11px;color:#7c90a9;margin-bottom:7px;font-weight:700}
 .rfq-summary-field strong{display:block;font-size:13px;line-height:1.5;color:#1d3553;font-weight:650;overflow-wrap:anywhere}
 .mail-thread{border-top:1px solid #e2e9f1;margin-top:26px;padding-top:16px}
+.thread-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:7px}
+.thread-header .secondary{padding:8px 12px;font-size:11px}
 .mail-thread h3{font-size:16px;color:#203650;margin:0 0 8px;display:flex;align-items:center;gap:10px}
 .mail-thread h3 span{font-size:11px;font-weight:750;color:#2c67cf;background:#eaf1ff;border-radius:8px;padding:4px 9px}
 .thread-hint{font-size:11px;color:#8190a6;line-height:1.55;margin:0 0 14px}
@@ -387,13 +389,45 @@ function openCard(id){
     <label class="wide">Referencia de oferta<input name="offer_reference" maxlength="100" value="${esc(c.offer_reference||'')}" placeholder="Ej.: 171126_MAZ05"></label>
     <label class="wide">Notas y seguimiento<textarea name="notes" rows="3" maxlength="10000" placeholder="Decisiones, acciones pendientes...">${esc(c.notes||'')}</textarea></label>
   </form>
-  <section class="mail-thread"><h3>Hilo de correos <span>${thread.length} ${thread.length===1?'mensaje':'mensajes'}</span></h3>
+  <section class="mail-thread"><div class="thread-header"><h3>Hilo de correos <span>${thread.length} ${thread.length===1?'mensaje':'mensajes'}</span></h3><button type="button" id="addThreadMailBtn" class="secondary">+ Añadir correo al hilo</button><input id="threadMailInput" type="file" accept=".eml,.msg,message/rfc822,application/vnd.ms-outlook" multiple hidden></div>
     <p class="thread-hint">Los mensajes se vinculan mediante las referencias de respuesta del correo. Si no existen, podrás asociarlos desde la detección de similitud.</p>
     ${threadMarkup}
   </section>
   <div class="info" style="margin-top:14px">${esc(c.original_filename||'RFQ creada manualmente')} · Registrada el ${esc(longDate(c.created_at))}</div>
   <div class="history"><b>Historial de la RFQ</b><ul>${(c.history||[]).slice().reverse().map(h=>`<li>${esc(h.event)} · ${esc(longDate(h.at))}</li>`).join('')}</ul></div>`;
   makeModal(c.subject,c.client||'Ficha de solicitud de oferta',body,'<button class="secondary" data-close>Cancelar</button><button id="saveCardBtn" class="primary">Guardar cambios</button>');
+  const threadFileInput=$('threadMailInput');
+  $('addThreadMailBtn').onclick=()=>threadFileInput.click();
+  threadFileInput.addEventListener('change',async()=>{
+    const files=Array.from(threadFileInput.files||[]);
+    threadFileInput.value='';
+    if(!files.length)return;
+    $('addThreadMailBtn').disabled=true;
+    try{
+      const converted=typeof window.gesmailConvertEmailFiles==='function'
+        ? await window.gesmailConvertEmailFiles(files) : files;
+      let imported=0;
+      for(const file of converted){
+        try{
+          const mail=await parseEML(file);
+          const row=cards.find(c=>c.id===id);
+          if(!row)break;
+          if(duplicateReason(mail,row)){
+            toast('El mensaje ya está incluido en este hilo.','warning');
+            continue;
+          }
+          if(appendMailToThread(id,mail))imported++;
+        }catch(err){toast('No se pudo añadir '+file.name+': '+err.message,'error')}
+      }
+      if(imported){
+        closeModal();
+        openCard(id);
+      }
+    }finally{
+      const btn=$('addThreadMailBtn');
+      if(btn)btn.disabled=false;
+    }
+  });
   $('saveCardBtn').onclick=()=>{
     const data=Object.fromEntries(new FormData($('cardForm')));
     if(!STAGES.includes(data.stage))return toast('Estado no válido','error');
@@ -665,5 +699,5 @@ render();
 </div>
 <div id="toastHost" aria-live="polite"></div>
 <div id="modalHost"></div>
-<script type="module" src="./msg-support.mjs?v=toast-native-20261117"></script>
+<script type="module" src="./msg-support.mjs?v=rfq-thread-20261117-b"></script>
 </body></html>
