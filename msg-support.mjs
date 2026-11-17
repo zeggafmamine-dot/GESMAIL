@@ -38,6 +38,17 @@ export function messageAsEml(info, reader) {
   const sender = (fromEmail && /^[^\s<>@]+@[^\s<>@]+$/.test(fromEmail))
     ? (fromName ? fromName.replace(/[<>]/g, '') + ' ' : '') + '<' + fromEmail + '>'
     : (fromName || fromEmail || fieldFromHeaders(headers, 'From'));
+  // Preferir cabeceras RFC completas; en algunos MSG de Outlook el campo CC
+  // está disponible únicamente como displayCc o lista de destinatarios.
+  const recipientList = Array.isArray(info?.recipients) ? info.recipients : [];
+  const recipientText = type => recipientList
+    .filter(r => String(r.recipType || r.recipientType || r.type || '').toLowerCase() === type)
+    .map(r => cleanHeader(r.smtpAddress || r.email || r.name || ''))
+    .filter(Boolean).join(', ');
+  const to = cleanHeader(fieldFromHeaders(headers, 'To') || info?.displayTo || recipientText('to'));
+  const cc = cleanHeader(fieldFromHeaders(headers, 'Cc') || info?.displayCc || recipientText('cc'));
+  const inReplyTo = cleanHeader(fieldFromHeaders(headers, 'In-Reply-To') || info?.inReplyTo || '');
+  const references = cleanHeader(fieldFromHeaders(headers, 'References') || info?.references || '');
   const msgId = cleanHeader(info?.internetMessageId || fieldFromHeaders(headers, 'Message-ID'));
   const time = info?.clientSubmitTime || info?.deliverTime || fieldFromHeaders(headers, 'Date');
   const date = time ? new Date(time) : null;
@@ -52,6 +63,10 @@ export function messageAsEml(info, reader) {
   const lines = [
     'From: ' + (sender || '(Sin remitente)'),
     'Subject: ' + (subject || '(Sin asunto)'),
+    ...(to ? ['To: ' + to] : []),
+    ...(cc ? ['Cc: ' + cc] : []),
+    ...(inReplyTo ? ['In-Reply-To: ' + inReplyTo] : []),
+    ...(references ? ['References: ' + references] : []),
     ...(msgId ? ['Message-ID: <' + msgId.replace(/^<|>$/g, '') + '>'] : []),
     ...(date && !Number.isNaN(date.getTime()) ? ['Date: ' + date.toUTCString()] : []),
     'MIME-Version: 1.0',
