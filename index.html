@@ -765,6 +765,7 @@ function openCard(id){
           const row=cards.find(c=>c.id===id);
           if(!row)break;
           if(duplicateReason(mail,row)){
+            if(upgradeEmailFormat(id,mail)){imported++;continue;}
             toast('El mensaje ya está incluido en este hilo.','warning');
             continue;
           }
@@ -957,24 +958,49 @@ function htmlAsText(html){
   return (doc.body?.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
 }
 
+
+/* Recupera logos CID y nombres locales de imágenes en correos .eml */
 function inlineEmailImages(attachments,html){
-  const map={};let remaining=1200*1024;
-  const body=String(html||'').toLowerCase();
-  for(const att of attachments||[]){
-    const raw=String(att.contentId||'').replace(/^<|>$/g,'').trim();
-    const id=raw.toLowerCase();
+  let resultHtml=String(html||'');
+  const map={};
+  let remaining=1200*1024;
+  const references=[...resultHtml.matchAll(/(?:\b(?:src|background)\s*=\s*["']?([^"'\s>]+))|(?:url\(\s*["']?([^"')\s]+))/gi)]
+    .map(match=>match[1]||match[2]).filter(Boolean);
+  const normalizeRef=value=>{
+    let ref=String(value||'').trim().replace(/^cid:/i,'').replace(/^<|>$/g,'');
+    try{ref=decodeURIComponent(ref)}catch {/* mantener cadena */}
+    return ref.replace(/\\/g,'/').toLowerCase();
+  };
+  for(const [index,att] of (attachments||[]).entries()){
+    if(index>150||Object.keys(map).length>=25)break;
     const mime=String(att.mimeType||'').toLowerCase();
     const encoded=typeof att.content==='string'?att.content:'';
-    if(!id||!/^image\/(png|jpeg|gif|webp)$/.test(mime)||!encoded)continue;
-    const size=Math.floor(encoded.length*3/4);
-    if(size>700*1024||size>remaining)continue;
-    const encodedId=encodeURIComponent(id).toLowerCase();
-    if(!body.includes('cid:'+id)&&!body.includes('cid:'+encodedId))continue;
-    if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))continue;
-    remaining-=size;
+    if(!/^image\/(?:png|jpeg|gif|webp)$/.test(mime)||!encoded||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))continue;
+    const bytes=Math.floor(encoded.length*3/4);
+    if(bytes>700*1024||bytes>remaining)continue;
+    const aliases=[att.contentId,att.filename,att.contentLocation].filter(Boolean).map(normalizeRef);
+    if(!aliases.length)continue;
+    const matched=references.find(value=>{
+      const normalized=normalizeRef(value);
+      const basename=normalized.split('/').pop();
+      return aliases.some(alias=>normalized===alias||basename===alias||
+        (alias.includes('.')&&(normalized.startsWith(alias+'@')||basename.startsWith(alias+'@'))));
+    });
+    if(!matched)continue;
+    const matchedRef=normalizeRef(matched);
+    const existingCid=normalizeRef(att.contentId||'');
+    const id=existingCid||(/^cid:/i.test(matched)?matchedRef:'gesmail-eml-'+index+'@inline');
+    if(map[id])continue;
     map[id]='data:'+mime+';base64,'+encoded;
+    remaining-=bytes;
+    if(!/^cid:/i.test(matched)||matchedRef!==id){
+      resultHtml=resultHtml.replace(/((?:src|background)\s*=\s*["']?)([^"'\s>]+)/gi,
+        (whole,prefix,value)=>normalizeRef(value)===matchedRef?prefix+'cid:'+id:whole);
+      resultHtml=resultHtml.replace(/(url\(\s*["']?)([^"')\s]+)/gi,
+        (whole,prefix,value)=>normalizeRef(value)===matchedRef?prefix+'cid:'+id:whole);
+    }
   }
-  return map;
+  return {html:resultHtml,images:map};
 }
 async function parsedMailWithHtml(buf,file){
   const PostalMime=await getPostalMime();
@@ -984,7 +1010,8 @@ async function parsedMailWithHtml(buf,file){
   const subject=String(mail.subject||'(Sin asunto)').trim();
   const sender=addressString(mail.from)||(mail.headers||[]).find(x=>x.key==='from')?.value||'(Sin remitente)';
   const to=addressString(mail.to),cc=addressString(mail.cc);
-  const body_html=String(mail.html||'').slice(0,300000);
+  const imageResult=inlineEmailImages(mail.attachments,String(mail.html||'').slice(0,600000));
+  const body_html=imageResult.html;
   const fullText=String(mail.text||htmlAsText(body_html)).trim();
   const normalized_subject=normalizeSubject(subject);
   const normalized_body=normalize(fullText).slice(0,14000);
@@ -996,7 +1023,7 @@ async function parsedMailWithHtml(buf,file){
   const fingerprint=[normalizeSender(sender),normalized_subject,normalized_body];
   if(!normalized_body)fingerprint.push(mail.date||'');
   return {subject,sender,to,cc,body_preview:fullText.slice(0,14000),body_html,
-    inline_images:body_html?inlineEmailImages(mail.attachments,body_html):{},
+    inline_images:imageResult.images,
     email_date:mail.date||getHeader('date')||null,message_id:msgId,in_reply_to,references,
     normalized_subject,normalized_body,raw_sha256:await sha256(buf),
     email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
