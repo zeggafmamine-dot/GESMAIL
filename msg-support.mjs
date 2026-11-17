@@ -384,25 +384,43 @@ export function enableMsgSupport() {
   overlay.textContent = 'Suelta sobre una RFQ para comparar hilos, o en otra zona para buscar coincidencias';
   Object.assign(overlay.style, {
     position: 'fixed',
-    inset: '0',
+    inset: 'auto 20px 20px auto',
     zIndex: '2147483646',
     boxSizing: 'border-box',
+    maxWidth: 'min(370px,calc(100vw - 40px))',
     display: 'none',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '32px',
-    border: '6px dashed #2563eb',
-    background: 'rgba(15, 23, 42, 0.86)',
-    color: '#fff',
-    font: 'bold 24px system-ui, sans-serif',
+    padding: '16px 20px',
+    border: '1px solid #b7d0f8',
+    borderRadius: '13px',
+    boxShadow: '0 12px 36px rgba(18,35,57,.24)',
+    background: 'rgba(246,250,255,.97)',
+    color: '#234d80',
+    font: 'bold 14px/1.4 system-ui,sans-serif',
     textAlign: 'center',
     pointerEvents: 'none'
   });
   document.body.appendChild(overlay);
 
   let dragDepth = 0;
-  const hideOverlay = () => { dragDepth = 0; overlay.style.display = 'none'; };
-  const showOverlay = () => { overlay.style.display = 'flex'; };
+  let highlightedCard = null;
+  const highlightTarget = target => {
+    const card = target?.closest?.('.rfq-card') || null;
+    if(card === highlightedCard)return;
+    if(highlightedCard)highlightedCard.classList.remove('rfq-mail-target');
+    highlightedCard=card;
+    if(highlightedCard)highlightedCard.classList.add('rfq-mail-target');
+    overlay.textContent=card
+      ? 'Soltar aquí: comparar con esta RFQ (no se añade sin aprobación)'
+      : 'Suelta el correo para buscar coincidencias con las RFQ';
+  };
+  const hideOverlay = () => {
+    dragDepth = 0;
+    overlay.style.display = 'none';
+    highlightTarget(null);
+  };
+  const showOverlay = () => {overlay.style.display = 'flex';};
 
   // Mantener el diálogo "Importar correos" y su comportamiento anterior.
   document.addEventListener('change', async event => {
@@ -426,6 +444,7 @@ export function enableMsgSupport() {
     if (!hasExternalFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    highlightTarget(event.target);
     showOverlay();
   }, true);
 
