@@ -85,10 +85,15 @@ function similarity(mail, row) {
   if (!bodyA || !bodyB) return Math.round(.85*subj+.15*sender);
   return Math.round(.30*subj+.60*ratio(bodyA, bodyB)+.10*sender);
 }
-function duplicateReason(mail, row) {
-  if (mail.message_id && row.message_id && mail.message_id === row.message_id) return 'Message-ID idéntico';
-  if (mail.raw_sha256 === row.raw_sha256) return 'Archivo idéntico';
-  if (mail.email_fingerprint === row.email_fingerprint) return 'Remitente, asunto y contenido idénticos';
+function duplicateReason(mail,row){
+  const entries=[row,...(Array.isArray(row.thread)?row.thread:[])];
+  for(const entry of entries){
+    if(mail.message_id && entry.message_id &&
+      normalizeMessageId(mail.message_id)===normalizeMessageId(entry.message_id))return 'Message-ID idéntico';
+    if(mail.raw_sha256 && entry.raw_sha256 && mail.raw_sha256===entry.raw_sha256)return 'Archivo idéntico';
+    if(mail.email_fingerprint && entry.email_fingerprint &&
+      mail.email_fingerprint===entry.email_fingerprint)return 'Remitente, asunto y contenido idénticos';
+  }
   return null;
 }
 function allMatches(mail, rows) {
@@ -444,44 +449,78 @@ function extractText(raw,depth=0){
 }
 async function parseEML(file){
   if(file.size>MAX_EMAIL_BYTES)throw new Error('El archivo supera el máximo de 35 MB.');
-  if(!/\.eml$/i.test(file.name))throw new Error('Esta demo admite .eml. Para Outlook clásico, exporta el correo a .eml o crea una RFQ manual.');
+  if(!/\.eml$/i.test(file.name))throw new Error('Esta demo admite archivos .msg y .eml de Outlook.');
   const buf=await file.arrayBuffer();
   const raw=new TextDecoder('utf-8',{fatal:false}).decode(buf);
-  const {headers}=splitEmail(raw), h=unfoldHeaders(headers);
+  const {headers}=splitEmail(raw),h=unfoldHeaders(headers);
   if(!h.subject&&!h.from&&!h['message-id'])throw new Error('El archivo no parece ser un correo EML válido.');
-  const subject=decodeHeader(h.subject||'(Sin asunto)').trim(),sender=decodeHeader(h.from||'(Sin remitente)').trim();
+  const subject=decodeHeader(h.subject||'(Sin asunto)').trim();
+  const sender=decodeHeader(h.from||'(Sin remitente)').trim();
+  const to=decodeHeader(h.to||'').trim();
+  const cc=decodeHeader(h.cc||'').trim();
   const body=extractText(raw).trim().slice(0,14000);
   const normalized_subject=normalizeSubject(subject),normalized_body=normalize(body).slice(0,14000);
   const msgId=normalizeMessageId(h['message-id']);
+  const idList=text=>(String(text||'').match(/<[^>]+>/g)||String(text||'').split(/\s+/)).map(normalizeMessageId).filter(Boolean);
+  const in_reply_to=idList(h['in-reply-to'])[0]||null;
+  const references=idList(h.references);
   const fingerprint=[normalizeSender(sender),normalized_subject,normalized_body];
   if(!normalized_body)fingerprint.push(h.date||'');
-  return {subject,sender,body_preview:body.slice(0,5000),email_date:h.date||null,message_id:msgId,
-    normalized_subject,normalized_body,raw_sha256:await sha256(buf),email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
+  return {subject,sender,to,cc,body_preview:body.slice(0,5000),email_date:h.date||null,
+    message_id:msgId,in_reply_to,references,
+    normalized_subject,normalized_body,raw_sha256:await sha256(buf),
+    email_fingerprint:await sha256(fingerprint.join('\n')),original_filename:file.name};
 }
 function addMail(mail){
-  const now=createdAt(),row={...mail,id:uuid(),client:'',owner_name:owner,offer_reference:'',notes:'',priority:'Normal',stage:'Petición',created_at:now,updated_at:now,history:[{at:now,event:'Correo importado; RFQ creada'}]};
+  const now=createdAt(),row={...mail,id:uuid(),client:'',owner_name:'',
+    offer_reference:'',notes:'',priority:'Normal',stage:'Petición',
+    thread:[newThreadEntry(mail)],created_at:now,updated_at:now,
+    history:[{at:now,event:'Correo importado; RFQ creada'}]};
   if(persist([row,...cards]))toast(`RFQ creada: «${mail.subject}»`,'success');
 }
 function showSimilarity(mail,matches){
   pendingSimilarity=mail;
-  const details=`<p class="similar-intro">El correo «<b>${esc(mail.subject)}</b>» se parece a solicitudes ya registradas. El porcentaje es una estimación, no una certeza.</p>${matches.map(({row,score})=>`<div class="score-row"><div><b>${esc(row.subject)}</b><small>${esc(row.owner_name)} · ${esc(row.stage)}</small></div><div class="score-value"><strong>${score}%</strong><div class="meter"><span style="width:${score}%"></span></div></div></div>`).join('')}`;
-  makeModal('Posible RFQ duplicada','',''+details,'<button class="secondary" id="skipSimilar">No crear</button><button class="primary" id="acceptSimilar">Crear independiente</button>','DETECCIÓN DE SIMILITUD');
+  const details=`<p class="similar-intro">El correo «<b>${esc(mail.subject)}</b>» se parece a solicitudes ya registradas. Puedes añadirlo a un hilo existente o crear otra RFQ.</p>
+    ${matches.map(({row,score})=>`<div class="score-row"><div><b>${esc(row.subject)}</b><small>${esc(row.owner_name||'Sin asignar')} · ${esc(row.stage)} · ${getThread(row).length} mensajes</small>
+    <button class="secondary score-thread-button" type="button" data-add-to-thread="${esc(row.id)}">Añadir al hilo de esta RFQ</button></div>
+    <div class="score-value"><strong>${score}%</strong><div class="meter"><span style="width:${score}%"></span></div></div></div>`).join('')}`;
+  makeModal('Correo parecido detectado','',details,
+    '<button class="secondary" id="skipSimilar">No crear</button><button class="primary" id="acceptSimilar">Crear RFQ independiente</button>','DETECCIÓN DE SIMILITUD');
   $('skipSimilar').onclick=()=>resolveSimilarity(false);
   $('acceptSimilar').onclick=()=>resolveSimilarity(true);
+  $('modalHost').querySelectorAll('[data-add-to-thread]').forEach(btn=>btn.onclick=()=>resolveSimilarity(false,btn.dataset.addToThread));
   $('modalHost').querySelector('[data-close]').onclick=e=>{e.preventDefault();resolveSimilarity(false)};
 }
-function resolveSimilarity(accept){const mail=pendingSimilarity;pendingSimilarity=null;closeModal();if(accept&&mail)addMail(mail);processQueue()}
+function resolveSimilarity(accept,targetId=null){
+  const mail=pendingSimilarity;
+  pendingSimilarity=null;
+  closeModal();
+  if(mail&&targetId)appendMailToThread(targetId,mail);
+  else if(accept&&mail)addMail(mail);
+  processQueue();
+}
 async function processQueue(){
   if(isBusy||pendingSimilarity)return;
   isBusy=true;
-  try{while(queue.length){
-    const file=queue.shift();let mail;
-    try{mail=await parseEML(file)}catch(e){toast(`${file.name}: ${e.message}`,'error');continue}
-    const result=allMatches(mail,cards.filter(c=>c.email_fingerprint||c.message_id||c.raw_sha256));
-    if(result.duplicate){toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');continue}
-    if(result.similar.length){showSimilarity(mail,result.similar);return}
-    addMail(mail);
-  }}finally{isBusy=false}
+  try{
+    while(queue.length){
+      const file=queue.shift();let mail;
+      try{mail=await parseEML(file)}
+      catch(e){toast(`${file.name}: ${e.message}`,'error');continue}
+      const result=allMatches(mail,cards.filter(c=>c.email_fingerprint||c.message_id||c.raw_sha256||getThread(c).length));
+      if(result.duplicate){
+        toast(`Duplicado exacto: «${result.duplicate.subject}». Responsable: ${result.duplicate.owner_name||'sin asignar'} (${result.reason}). No se creó ninguna tarjeta.`,'warning');
+        continue;
+      }
+      const replyTarget=findThreadByReply(mail);
+      if(replyTarget){
+        appendMailToThread(replyTarget.id,mail);
+        continue;
+      }
+      if(result.similar.length){showSimilarity(mail,result.similar);return}
+      addMail(mail);
+    }
+  }finally{isBusy=false}
 }
 function addFiles(files){const incoming=Array.from(files||[]);if(!incoming.length)return toast('El navegador no ha recibido archivos. Exporta el correo como .eml.','warning');queue.push(...incoming);processQueue()}
 function download(filename,text,type='application/json'){
