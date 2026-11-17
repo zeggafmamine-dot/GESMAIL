@@ -138,6 +138,30 @@
 }
 @media(max-width:460px){#emailReaderHost .reader-top{padding:9px}#emailReaderHost .reader-top .reader-remote{max-width:120px;white-space:normal;padding:5px 7px}#emailReaderHost .reader-toolbar{gap:8px}#emailReaderHost .reader-view-options{gap:4px}#emailReaderHost .reader-action{font-size:11px;padding:6px 8px}}
 
+/* Adjuntos visibles y vistas previas en el lector */
+#emailReaderHost .reader-attachments{padding:10px 25px 12px;background:#fbfcff;border-bottom:1px solid #e6edf5;flex:none;max-height:205px;overflow:auto}
+#emailReaderHost .reader-attachments[hidden]{display:none}
+#emailReaderHost .reader-attachments-title{font-size:11px;font-weight:800;color:#57708d;margin:0 0 9px}
+#emailReaderHost .reader-attachments-list{display:flex;gap:8px;flex-wrap:wrap}
+#emailReaderHost .reader-attachment-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #dfe8f3;background:#fff;border-radius:10px;min-width:240px;max-width:100%;flex:1 1 330px}
+#emailReaderHost .reader-file-symbol{display:grid;place-items:center;width:38px;height:39px;flex:none;border-radius:8px;background:#e9f0fa;color:#2865bf;font-size:10px;font-weight:850}
+#emailReaderHost .reader-file-details{min-width:0;flex:1}
+#emailReaderHost .reader-file-details strong{display:block;color:#26415f;font-weight:750;font-size:12px;overflow-wrap:anywhere}
+#emailReaderHost .reader-file-details small{color:#8d9aab;font-size:10px}
+#emailReaderHost .reader-attachment-actions{display:flex;gap:5px;flex:none}
+#emailReaderHost .reader-attachment-actions .reader-action{font-size:11px;padding:5px 9px;min-height:29px}
+#emailReaderHost .reader-attachment-shade{position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:14px;background:#0b1b33c9}
+#emailReaderHost .reader-window{position:relative}
+#emailReaderHost .reader-attachment-dialog{background:white;display:flex;flex-direction:column;overflow:hidden;width:min(100%,1100px);height:min(100%,780px);border-radius:11px;box-shadow:0 18px 60px #0007}
+#emailReaderHost .reader-attachment-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #dce6f0;padding:10px 15px}
+#emailReaderHost .reader-attachment-dialog-head strong{font-size:13px;overflow-wrap:anywhere}
+#emailReaderHost .reader-attachment-dialog-head>div{display:flex;gap:8px}
+#emailReaderHost .reader-attachment-preview{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;background:#f3f6fa}
+#emailReaderHost .reader-attachment-preview img{max-width:100%;max-height:100%;object-fit:contain}
+#emailReaderHost .reader-attachment-preview iframe{width:100%;height:100%;border:0}
+#emailReaderHost .reader-attachment-preview pre{background:white;padding:18px;align-self:stretch;width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 Consolas,monospace;margin:0}
+@media(max-width:600px){#emailReaderHost .reader-attachments{padding:10px 13px}#emailReaderHost .reader-attachment-item{min-width:0}#emailReaderHost .reader-attachment-actions{flex-direction:column}}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -742,6 +766,8 @@ function showEmailReader(message,defaultSubject='',conversation=null,startIndex=
         '<div class="reader-meta"><b>Para:</b><span class="reader-to"></span>',
           '<b>CC:</b><span class="reader-cc"></span></div>',
       '</div>',
+      '<div class="reader-attachments" hidden><div class="reader-attachments-title"></div>',
+        '<div class="reader-attachments-list"></div></div>',
       '<div class="reader-alert" role="note" hidden></div>',
       '<div class="reader-paper"><iframe class="reader-frame" title="Mensaje original en solo lectura"',
         ' sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe></div>',
@@ -757,6 +783,132 @@ function showEmailReader(message,defaultSubject='',conversation=null,startIndex=
   const next=shade.querySelector('.reader-next');
   const notice=shade.querySelector('.reader-alert');
   const currentMail=()=>thread[selectedIndex]||message;
+
+  const attachmentPanel=shade.querySelector('.reader-attachments');
+  const attachmentList=shade.querySelector('.reader-attachments-list');
+  const attachmentTitle=shade.querySelector('.reader-attachments-title');
+  let activeAttachmentPreview=null,activePreviewURL=null;
+  function attachmentMime(att){
+    const mime=String(att.mime||'application/octet-stream').toLowerCase();
+    const extension=String(att.name||'').split('.').pop().toLowerCase();
+    if(['png','jpg','jpeg','gif','webp'].includes(extension)&&!mime.startsWith('image/'))return 'image/'+(extension==='jpg'?'jpeg':extension);
+    if(extension==='pdf'&&mime==='application/octet-stream')return 'application/pdf';
+    if(['txt','csv'].includes(extension)&&mime==='application/octet-stream')return 'text/plain';
+    return mime;
+  }
+  function attachmentSymbol(att){
+    const mime=attachmentMime(att);
+    if(mime==='application/pdf')return 'PDF';
+    if(mime.startsWith('image/'))return 'IMG';
+    if(/spreadsheet|excel|csv/.test(mime))return 'XLS';
+    if(/wordprocessing|msword/.test(mime))return 'DOC';
+    if(/zip|compressed/.test(mime))return 'ZIP';
+    return 'FILE';
+  }
+  function previewSupported(att){
+    return /^(application\/pdf|image\/(png|jpeg|gif|webp)|text\/(plain|csv))$/i.test(attachmentMime(att));
+  }
+  async function retrieveAttachment(att){
+    try{
+      const blob=await getAttachmentBlob(att.id);
+      if(!blob)throw new Error('El archivo no está almacenado en este navegador.');
+      return blob;
+    }catch(e){
+      toast('No se pudo recuperar «'+att.name+'». Reimporta el mensaje original para restaurar el adjunto.','warning');
+      console.warn('GESMAIL:',e);
+      return null;
+    }
+  }
+  async function downloadAttachment(att){
+    const blob=await retrieveAttachment(att);
+    if(!blob||closed)return;
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');
+    anchor.href=url;
+    anchor.download=att.name||'adjunto';
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }
+  function closePreview(){
+    if(!activeAttachmentPreview)return;
+    activeAttachmentPreview.remove();
+    activeAttachmentPreview=null;
+    if(activePreviewURL){URL.revokeObjectURL(activePreviewURL);activePreviewURL=null;}
+  }
+  async function previewAttachment(att){
+    if(!previewSupported(att))return downloadAttachment(att);
+    const blob=await retrieveAttachment(att);
+    if(!blob||closed)return;
+    closePreview();
+    const mime=attachmentMime(att);
+    const preview=document.createElement('div');
+    preview.className='reader-attachment-shade';
+    preview.innerHTML='<div class="reader-attachment-dialog" role="dialog" aria-modal="true" aria-label="Vista previa de adjunto">'+
+      '<div class="reader-attachment-dialog-head"><strong></strong><div>'+
+      '<button type="button" class="reader-action reader-attachment-save">Descargar</button>'+
+      '<button type="button" class="reader-action reader-attachment-close" aria-label="Cerrar vista previa">×</button></div></div>'+
+      '<div class="reader-attachment-preview"></div></div>';
+    preview.querySelector('strong').textContent=att.name||'Archivo adjunto';
+    preview.querySelector('.reader-attachment-save').onclick=()=>downloadAttachment(att);
+    preview.querySelector('.reader-attachment-close').onclick=closePreview;
+    preview.addEventListener('mousedown',e=>{if(e.target===preview)closePreview()});
+    const body=preview.querySelector('.reader-attachment-preview');
+    if(/^image\//.test(mime)){
+      activePreviewURL=URL.createObjectURL(new Blob([blob],{type:mime}));
+      const img=document.createElement('img');
+      img.src=activePreviewURL;
+      img.alt=att.name||'Imagen adjunta';
+      body.append(img);
+    }else if(mime==='application/pdf'){
+      activePreviewURL=URL.createObjectURL(new Blob([blob],{type:'application/pdf'}));
+      const iframe=document.createElement('iframe');
+      iframe.title='PDF adjunto';
+      iframe.src=activePreviewURL;
+      iframe.setAttribute('sandbox','');
+      iframe.referrerPolicy='no-referrer';
+      body.append(iframe);
+    }else{
+      const pre=document.createElement('pre');
+      pre.textContent=(await blob.text()).slice(0,1000000);
+      body.append(pre);
+    }
+    if(closed){closePreview();return;}
+    activeAttachmentPreview=preview;
+    panel.append(preview);
+    preview.querySelector('.reader-attachment-close').focus();
+  }
+  function displayAttachments(mail){
+    const files=Array.isArray(mail.attachments)?mail.attachments:[];
+    attachmentPanel.hidden=!files.length;
+    attachmentList.replaceChildren();
+    attachmentTitle.textContent='Archivos adjuntos · '+files.length+(files.length===1?' archivo':' archivos');
+    for(const att of files){
+      const row=document.createElement('div');row.className='reader-attachment-item';
+      const badge=document.createElement('span');badge.className='reader-file-symbol';
+      badge.textContent=attachmentSymbol(att);
+      const info=document.createElement('div');info.className='reader-file-details';
+      const name=document.createElement('strong');name.textContent=att.name||'Adjunto';
+      const sub=document.createElement('small');
+      sub.textContent=fileSize(att.size)+(att.stored?'':' · No guardado, reimportar correo');
+      info.append(name,sub);
+      const actions=document.createElement('div');actions.className='reader-attachment-actions';
+      if(previewSupported(att)){
+        const open=document.createElement('button');
+        open.type='button';open.className='reader-action';open.textContent='Ver';
+        open.disabled=!att.stored;open.onclick=()=>previewAttachment(att);
+        actions.append(open);
+      }
+      const save=document.createElement('button');
+      save.type='button';save.className='reader-action';save.textContent='Descargar';
+      save.disabled=!att.stored;save.onclick=()=>downloadAttachment(att);
+      actions.append(save);
+      row.append(badge,info,actions);
+      attachmentList.append(row);
+    }
+  }
+
   function missingCidImages(mail){
     const embedded=mail.inline_images||{};
     const refs=[...String(mail.body_html||'').matchAll(/cid:([^'"\s>)]+)/gi)];
@@ -792,6 +944,7 @@ function showEmailReader(message,defaultSubject='',conversation=null,startIndex=
     else if(!allowRemote&&usesRemoteImages(current))message='Las imágenes alojadas fuera del correo están bloqueadas por privacidad. Puedes activarlas desde “Mostrar imágenes externas”.';
     notice.textContent=message;
     notice.hidden=!message;
+    displayAttachments(current);
     shade.querySelector('.reader-origin').textContent=(current.original_filename||'Correo importado')+
       ' · Solo lectura, sin edición ni envío';
     frame.srcdoc=buildEmailDocument(current,allowRemote,zoom,asText);
@@ -805,13 +958,14 @@ function showEmailReader(message,defaultSubject='',conversation=null,startIndex=
   }
   function close(){
     if(closed)return;
+    closePreview();
     closed=true;
     document.removeEventListener('keydown',onKey,true);
     host.replaceChildren();
     if(previousFocus?.isConnected&&typeof previousFocus.focus==='function')previousFocus.focus();
   }
   function onKey(e){
-    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(activeAttachmentPreview)closePreview();else close();return;}
     if(e.key==='Tab'){
       const buttons=[...panel.querySelectorAll('button:not([disabled]):not([hidden])')]
         .filter(b=>getComputedStyle(b).display!=='none');
@@ -857,6 +1011,7 @@ function openCard(id){
         <div><strong>Para:</strong> ${esc(m.to||'No consta')}</div>
         <div><strong>CC:</strong> ${esc(m.cc||'Sin personas en copia')}</div>
         <div><strong>Fecha:</strong> ${esc(longDate(m.email_date||m.imported_at))}</div>
+        ${(m.attachments||[]).length?`<div><strong>Adjuntos:</strong> ${(m.attachments||[]).length} archivo(s)</div>`:''}
         ${m.body_preview?`<p class="thread-mail-preview">${esc(m.body_preview.slice(0,240))}</p>`:'<p class="thread-empty">Abre el lector para consultar el contenido disponible.</p>'}<button type="button" class="read-message" data-read-message="${i}">Leer correo completo</button>
       </div>
     </details>`).join(''):'<p class="thread-empty">Esta RFQ se creó sin correo. Importa un mensaje relacionado para añadirlo al hilo.</p>';
