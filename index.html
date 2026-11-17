@@ -27,6 +27,35 @@
 @media(prefers-reduced-motion:reduce){#toastHost .toast{animation:none}}
 .overlay{position:fixed;z-index:100;inset:0;background:#13243b99;display:flex;align-items:center;justify-content:center;padding:16px}.dialog{background:#fff;width:min(100%,620px);max-height:90vh;overflow-y:auto;border-radius:15px;box-shadow:0 14px 60px #0003}.dialog-head{display:flex;justify-content:space-between;gap:15px;align-items:flex-start;padding:22px 26px 17px;border-bottom:1px solid #ecf0f5}.dialog-head small{display:block;color:#9baaba;font-size:10px;font-weight:850;letter-spacing:1.2px;margin-bottom:10px}.dialog-head h2{font-size:20px;line-height:1.3;margin:0}.dialog-head p{margin:9px 0 0;font-size:12px;color:#8697a8;overflow-wrap:anywhere}.close{background:none;border:0;color:#8593a4;font-size:25px;padding:0;line-height:1}.dialog-body{padding:24px 26px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.form-grid label{display:flex;flex-direction:column;font-size:11px;font-weight:750;color:#687b92;gap:7px}.form-grid input,.form-grid select,.form-grid textarea{background:#fcfdff;border:1px solid #dfe6f0;border-radius:8px;padding:11px;color:#253953;font-size:12px;min-width:0}.form-grid .wide{grid-column:1/-1}.form-grid textarea{resize:vertical}.body-preview{margin-top:19px;border:1px solid #e6ebf3;border-radius:8px;padding:12px;color:#6d829b;font-size:12px}.body-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:12px;color:#3e516a;max-height:170px;overflow:auto}.history{margin-top:19px;color:#6b7d92;font-size:11px}.history b{display:block;margin-bottom:9px;font-size:12px}.history li{margin:6px 0}.dialog-actions{padding:16px 25px 23px;border-top:1px solid #edf0f5;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.dialog-actions.split{justify-content:space-between}.score-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid #e8edf4;border-radius:8px;margin-top:10px}.score-row b{font-size:12px}.score-row small{display:block;font-size:11px;color:#8a9aad;margin-top:7px}.score-value{text-align:right;min-width:90px}.score-value strong{font-size:15px;color:#b07828}.meter{height:5px;background:#ebeff4;border-radius:9px;overflow:hidden;margin-top:8px}.meter span{display:block;height:100%;background:#e3ac55}.similar-intro{font-size:13px;color:#60768d;line-height:1.6;margin:0 0 15px}.info{color:#8698ac;font-size:11px}.msg-error{font-size:12px;color:#b64b53}.warn{font-size:12px;color:#985d16}.mobile-hint{display:none}@media(max-width:1200px){.main{padding:20px}.sidebar{width:205px}.board{grid-template-columns:repeat(4,minmax(230px,1fr))}.stats{gap:8px}.stats>div{padding:13px}}@media(max-width:760px){.shell{display:block}.sidebar{position:static;height:auto;min-height:auto;width:auto}.logo{padding:13px}.nav-group,.user-panel{display:none}.main{padding:17px 12px}.topbar{align-items:flex-start}.topbar h1{font-size:23px}.topbar p{font-size:11px}.topbar .primary{padding:10px}.demo-bar{flex-wrap:wrap}.demo-tag{margin-left:0}.stats{grid-template-columns:repeat(2,1fr)}.stats strong{font-size:24px}.upload{flex-wrap:wrap}.upload .secondary{margin-left:auto}.board-bar{flex-direction:column;align-items:flex-start}.board-actions{width:100%}.search{flex:1}.board{grid-template-columns:repeat(4,minmax(235px,1fr))}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:1}.dialog-head{padding:18px}.dialog-body{padding:18px}}
 
+
+/* Ficha RFQ: metadatos de correo y conversación */
+.dialog:has(.rfq-summary){width:min(100%,780px)}
+.rfq-summary{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:21px}
+.rfq-summary-field{background:#f5f8fd;border:1px solid #e4ebf5;border-radius:10px;padding:13px 15px;min-width:0}
+.rfq-summary-field:first-child{grid-column:1/-1}
+.rfq-summary-field small{display:block;font-size:11px;color:#7c90a9;margin-bottom:7px;font-weight:700}
+.rfq-summary-field strong{display:block;font-size:13px;line-height:1.5;color:#1d3553;font-weight:650;overflow-wrap:anywhere}
+.mail-thread{border-top:1px solid #e2e9f1;margin-top:26px;padding-top:16px}
+.mail-thread h3{font-size:16px;color:#203650;margin:0 0 8px;display:flex;align-items:center;gap:10px}
+.mail-thread h3 span{font-size:11px;font-weight:750;color:#2c67cf;background:#eaf1ff;border-radius:8px;padding:4px 9px}
+.thread-hint{font-size:11px;color:#8190a6;line-height:1.55;margin:0 0 14px}
+.thread-email{background:#fff;border:1px solid #e2e9f1;border-radius:11px;margin:9px 0;overflow:hidden}
+.thread-email[open]{border-color:#bfd2ed;box-shadow:0 3px 13px #294c820d}
+.thread-email summary{display:flex;align-items:flex-start;gap:12px;cursor:pointer;padding:13px 14px;list-style:none}
+.thread-email summary::-webkit-details-marker{display:none}
+.thread-email summary:hover{background:#f8fbff}
+.thread-num{width:27px;height:27px;flex:none;background:#eaf1fe;color:#2364d1;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:800}
+.thread-line{display:flex;flex-direction:column;gap:3px;min-width:0}
+.thread-line strong{font-size:12px;color:#243a55;overflow-wrap:anywhere}
+.thread-line small{font-size:11px;color:#8190a4;overflow-wrap:anywhere}
+.thread-email-details{padding:5px 18px 17px 53px;color:#576a82;font-size:12px;line-height:1.8;overflow-wrap:anywhere}
+.thread-email-details>div strong{color:#2a425e}
+.thread-mail-body{display:block;background:#f5f7fb;border:1px solid #e8edf5;border-radius:9px;margin:12px 0 0;padding:13px;max-height:290px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 "Segoe UI",sans-serif;color:#2c3e55}
+.thread-empty{color:#8795a7;font-size:12px;margin:9px 0;line-height:1.5}
+.team-helper{background:#f2f6fd;border:1px solid #dce7f9;padding:12px 14px;border-radius:10px;color:#55708e;font-size:12px;line-height:1.6;margin-bottom:19px}
+.score-thread-button{margin-top:10px!important;padding:7px 10px!important;white-space:normal!important;text-align:left;font-size:11px!important}
+@media(max-width:640px){.rfq-summary{grid-template-columns:1fr}.rfq-summary-field:first-child{grid-column:1}.thread-email-details{padding-left:13px}.thread-num{width:23px;height:23px}.dialog:has(.rfq-summary){width:min(100%,780px)}}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -174,7 +203,7 @@ function manageTeam(){
 }
 
 function getThread(card){
-  if(Array.isArray(card.thread) && card.thread.length)return card.thread;
+  if(Array.isArray(card.thread))return card.thread;
   // Mantener visibles los correos de RFQ ya guardadas antes de esta versión.
   if(!card.sender && !card.body_preview && !card.message_id)return [];
   return [{message_id:card.message_id||null,subject:card.subject||'',
@@ -534,10 +563,46 @@ async function importBackup(file){
     if(persist(clean))toast('Copia de seguridad restaurada.','success');
   }catch(e){toast('No se pudo importar la copia: '+e.message,'error')}
 }
-async function loadExamples(){
-  const files=['rfq_inicial.eml','rfq_distinta.eml'];
-  const demos=[`From: Cliente Demo <compras@cliente-ejemplo.test>\nSubject: RFQ 2 x Transformador 20 kVA 415/240 V\nMessage-ID: <demo-rfq-2026-001@cliente-ejemplo.test>\nDate: Mon, 16 Nov 2026 11:30:00 +0100\nContent-Type: text/plain; charset=utf-8\n\nBuenos días,\nSolicitamos cotización de 2 transformadores de aislamiento de 20 kVA,\nentrada 415 V, salida 240 V, IP23, Dyn11, bobinados de aluminio.\nNecesitamos precio, plazo de entrega y dimensiones.\nSaludos.`,
-    `From: Otro Cliente <pedidos@otro-cliente.test>\nSubject: Request for quotation - reactor 160A\nMessage-ID: <demo-rfq-2026-003@otro-cliente.test>\nDate: Mon, 16 Nov 2026 13:00:00 +0100\nContent-Type: text/plain; charset=utf-8\n\nDear Sir,\nPlease quote 12 pcs reactors 160 A / 50 Hz, IP00, for an industrial project.\nBest regards.`];
+function loadExamples(){
+  const files=['rfq_inicial.eml','rfq_distinta.eml','rfq_respuesta.eml'];
+  const demos=[
+    `From: Cliente Demo <compras@cliente-ejemplo.test>
+To: Ventas <ventas@polylux.test>
+Cc: Responsable Técnico <tecnico@cliente-ejemplo.test>, Proyecto <proyecto@cliente-ejemplo.test>
+Subject: RFQ 2 x Transformador 20 kVA 415/240 V
+Message-ID: <demo-rfq-2026-001@cliente-ejemplo.test>
+Date: Mon, 16 Nov 2026 11:30:00 +0100
+Content-Type: text/plain; charset=utf-8
+
+Buenos días,
+Solicitamos cotización de 2 transformadores de aislamiento de 20 kVA,
+entrada 415 V, salida 240 V, IP23, Dyn11, bobinados de aluminio.
+Necesitamos precio, plazo de entrega y dimensiones.
+Saludos.`,
+    `From: Otro Cliente <pedidos@otro-cliente.test>
+To: Ventas <ventas@polylux.test>
+Subject: Request for quotation - reactor 160A
+Message-ID: <demo-rfq-2026-003@otro-cliente.test>
+Date: Mon, 16 Nov 2026 13:00:00 +0100
+Content-Type: text/plain; charset=utf-8
+
+Dear Sir,
+Please quote 12 pcs reactors 160 A / 50 Hz, IP00, for an industrial project.
+Best regards.`,
+    `From: Cliente Demo <compras@cliente-ejemplo.test>
+To: Ventas <ventas@polylux.test>
+Cc: Responsable Técnico <tecnico@cliente-ejemplo.test>
+Subject: RE: RFQ 2 x Transformador 20 kVA 415/240 V
+Message-ID: <demo-rfq-2026-004@cliente-ejemplo.test>
+In-Reply-To: <demo-rfq-2026-001@cliente-ejemplo.test>
+References: <demo-rfq-2026-001@cliente-ejemplo.test>
+Date: Tue, 17 Nov 2026 10:15:00 +0100
+Content-Type: text/plain; charset=utf-8
+
+Buenos días,
+Confirmamos que necesitamos dos unidades y solicitamos dimensiones exteriores.
+Gracias.`
+  ];
   queue.push(...demos.map((raw,i)=>new File([raw],files[i],{type:'message/rfc822'})));
   processQueue();
 }
