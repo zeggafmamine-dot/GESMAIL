@@ -162,6 +162,46 @@
 #emailReaderHost .reader-attachment-preview pre{background:white;padding:18px;align-self:stretch;width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 Consolas,monospace;margin:0}
 @media(max-width:600px){#emailReaderHost .reader-attachments{padding:10px 13px}#emailReaderHost .reader-attachment-item{min-width:0}#emailReaderHost .reader-attachment-actions{flex-direction:column}}
 
+/* Comparador de posibles hilos: correos originales enfrentados y confirmación manual */
+.thread-compare-dialog{width:min(1190px,100%)!important;max-height:min(96vh,1080px)!important;display:flex;flex-direction:column;overflow:hidden!important}
+.thread-compare-dialog .dialog-head{padding:14px 22px 12px;flex:none}
+.thread-compare-dialog .dialog-head h2{font-size:20px}
+.thread-compare-dialog .dialog-body{flex:1;min-height:0;overflow-y:auto;padding:14px 20px 18px}
+.thread-compare-dialog .dialog-actions{flex:none;gap:9px;padding:13px 20px}
+.thread-compare-dialog #discardThreadMatch{margin-right:auto}
+.thread-compare-intro{margin:0 0 12px;font-size:12px;color:#57708d;line-height:1.55}
+.thread-compare-selection{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.thread-compare-selection label{font-weight:750;font-size:12px;color:#3d5878}
+.thread-compare-selection select{max-width:100%;flex:1;min-width:210px;border:1px solid #cfdced;background:#fff;color:#253f5c;border-radius:8px;padding:9px;font-size:12px}
+.thread-match-score{font-size:11px;color:#3468aa;font-weight:800;background:#eaf2fe;border-radius:8px;padding:8px 10px}
+.thread-compare-reasons{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px}
+.thread-compare-reason{border-radius:7px;background:#f0f6fb;color:#416b90;font-size:11px;font-weight:700;padding:5px 9px}
+.thread-compare-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:13px;min-height:0}
+.thread-compare-card{min-width:0;overflow:hidden;display:flex;flex-direction:column;border:1px solid #dde6f0;border-radius:11px;background:#fff}
+.thread-compare-card-top{display:flex;align-items:center;gap:9px;padding:10px 12px;font-size:12px;font-weight:800;background:#f2f6fc;color:#2b5278}
+.thread-compare-incoming .thread-compare-card-top{background:#edf6f0;color:#28704f}
+.thread-compare-card-top small{font-size:10px;font-weight:700;margin-left:auto;color:#7d90a4;text-align:right}
+.thread-compare-indicator{width:23px;height:23px;display:grid;place-items:center;border-radius:7px;background:#dbe8f9;color:#2366b3;flex:none}
+.thread-compare-incoming .thread-compare-indicator{background:#d9eee1;color:#227347}
+.thread-compare-mail-meta{padding:12px;min-height:136px;max-height:172px;overflow:auto;font-size:11px;color:#62778d;line-height:1.55;overflow-wrap:anywhere}
+.thread-compare-mail-meta>div{margin-top:3px}
+.thread-compare-mail-meta b{font-weight:800;color:#415970}
+.thread-compare-subject{display:block;font-size:13px;font-weight:800;color:#253e59;margin-bottom:9px;line-height:1.4}
+.thread-compare-files{color:#4d6d8b;padding-top:7px;border-top:1px solid #edf0f5}
+.thread-compare-message{width:100%;height:clamp(210px,38vh,440px);border:0;border-top:1px solid #e8edf2;background:#fff}
+@media(max-width:800px){
+ .thread-compare-dialog{max-height:97dvh!important}
+ .thread-compare-grid{grid-template-columns:1fr}
+ .thread-compare-message{height:245px}
+ .thread-compare-dialog .dialog-head{padding:12px 14px}
+ .thread-compare-dialog .dialog-body{padding:12px}
+ .thread-compare-dialog .dialog-actions{padding:11px}
+ .thread-compare-dialog .dialog-actions button{font-size:11px;padding:9px 11px}
+ .thread-compare-card-top{padding:8px 10px}
+ .thread-compare-mail-meta{min-height:0;max-height:155px}
+ .thread-compare-selection select{min-width:190px}
+}
+
 </style>
   <script type="module">
 // Rules shared by the browser and node tests. Similarity is a heuristic, not AI.
@@ -1456,27 +1496,125 @@ async function addMail(mail){
     history:[{at:now,event:'Correo importado; RFQ creada'}]};
   if(persist([row,...cards]))toast(`RFQ creada: «${mail.subject}»`,'success');
 }
+
 function showSimilarity(mail,matches){
   pendingSimilarity=mail;
-  const details=`<p class="similar-intro">El correo «<b>${esc(mail.subject)}</b>» se parece a solicitudes ya registradas. Puedes añadirlo a un hilo existente o crear otra RFQ.</p>
-    ${matches.map(({row,score})=>`<div class="score-row"><div><b>${esc(row.subject)}</b><small>${esc(row.owner_name||'Sin asignar')} · ${esc(row.stage)} · ${getThread(row).length} mensajes</small>
-    <button class="secondary score-thread-button" type="button" data-add-to-thread="${esc(row.id)}">Añadir al hilo de esta RFQ</button></div>
-    <div class="score-value"><strong>${score}%</strong><div class="meter"><span style="width:${score}%"></span></div></div></div>`).join('')}`;
-  makeModal('Correo parecido detectado','',details,
-    '<button class="secondary" id="skipSimilar">No crear</button><button class="primary" id="acceptSimilar">Crear RFQ independiente</button>','DETECCIÓN DE SIMILITUD');
-  $('skipSimilar').onclick=()=>resolveSimilarity(false);
-  $('acceptSimilar').onclick=()=>resolveSimilarity(true);
-  $('modalHost').querySelectorAll('[data-add-to-thread]').forEach(btn=>btn.onclick=()=>resolveSimilarity(false,btn.dataset.addToThread));
-  $('modalHost').querySelector('[data-close]').onclick=e=>{e.preventDefault();resolveSimilarity(false)};
+  const options=matches.map((m,i)=>'<option value="'+i+'">'+
+    esc(m.row.subject||'RFQ sin asunto')+' · '+m.score+'/100 · '+
+    esc(m.row.client||m.row.owner_name||'Sin empresa asignada')+'</option>').join('');
+  const content=[
+    '<p class="thread-compare-intro">Es posible que este mensaje pertenezca a un hilo existente. ',
+      'Compara el correo registrado <strong>a la izquierda</strong> con el recién importado ',
+      '<strong>a la derecha</strong> antes de decidir.</p>',
+    '<div class="thread-compare-selection">',
+      '<label for="threadMatchChoice">Posibles RFQ relacionadas</label>',
+      '<select id="threadMatchChoice">'+options+'</select>',
+      '<span class="thread-match-score" id="threadMatchScore"></span>',
+    '</div>',
+    '<div class="thread-compare-reasons" id="threadCompareReasons"></div>',
+    '<div class="thread-compare-grid">',
+      '<section class="thread-compare-card thread-compare-existing">',
+        '<header class="thread-compare-card-top"><span class="thread-compare-indicator">1</span>',
+          '<span>Correo registrado</span><small id="threadExistingCount"></small></header>',
+        '<div class="thread-compare-mail-meta">',
+          '<strong class="thread-compare-subject" id="threadExistingSubject"></strong>',
+          '<div><b>De:</b> <span id="threadExistingFrom"></span></div>',
+          '<div><b>Para:</b> <span id="threadExistingTo"></span></div>',
+          '<div><b>CC:</b> <span id="threadExistingCc"></span></div>',
+          '<div><b>Fecha:</b> <span id="threadExistingDate"></span></div>',
+          '<div class="thread-compare-files" id="threadExistingFiles"></div>',
+        '</div>',
+        '<iframe id="threadExistingBody" class="thread-compare-message"',
+          ' title="Correo ya registrado, solo lectura" sandbox="" referrerpolicy="no-referrer"></iframe>',
+      '</section>',
+      '<section class="thread-compare-card thread-compare-incoming">',
+        '<header class="thread-compare-card-top"><span class="thread-compare-indicator">2</span>',
+          '<span>Correo arrastrado</span><small>Nuevo mensaje</small></header>',
+        '<div class="thread-compare-mail-meta">',
+          '<strong class="thread-compare-subject" id="threadIncomingSubject"></strong>',
+          '<div><b>De:</b> <span id="threadIncomingFrom"></span></div>',
+          '<div><b>Para:</b> <span id="threadIncomingTo"></span></div>',
+          '<div><b>CC:</b> <span id="threadIncomingCc"></span></div>',
+          '<div><b>Fecha:</b> <span id="threadIncomingDate"></span></div>',
+          '<div class="thread-compare-files" id="threadIncomingFiles"></div>',
+        '</div>',
+        '<iframe id="threadIncomingBody" class="thread-compare-message"',
+          ' title="Correo importado, solo lectura" sandbox="" referrerpolicy="no-referrer"></iframe>',
+      '</section>',
+    '</div>'
+  ].join('');
+  const actions=[
+    '<button type="button" class="secondary" id="discardThreadMatch">Descartar correo</button>',
+    '<button type="button" class="secondary" id="rejectThreadMatch">No, crear RFQ aparte</button>',
+    '<button type="button" class="primary" id="acceptThreadMatch">Sí, añadir al hilo</button>'
+  ].join('');
+  makeModal('¿Pertenecen al mismo hilo?',
+    'No se vinculará ningún correo sin tu confirmación.',content,actions,
+    'COMPARACIÓN DE CORREOS');
+  const root=$('modalHost');
+  root.querySelector('.dialog').classList.add('thread-compare-dialog');
+  const choice=$('threadMatchChoice');
+  const fillMail=(prefix,message,defaultSubject)=>{
+    $(prefix+'Subject').textContent=message?.subject||defaultSubject||'Sin asunto';
+    $(prefix+'From').textContent=message?.sender||'No disponible';
+    $(prefix+'To').textContent=message?.to||'No consta';
+    $(prefix+'Cc').textContent=message?.cc||'Sin CC';
+    $(prefix+'Date').textContent=longDate(message?.email_date||message?.imported_at);
+    const parts=message?.attachments||[];
+    $(prefix+'Files').textContent=parts.length?'Adjuntos: '+parts.map(a=>a.name||'Archivo').slice(0,5).join(', ')+
+      (parts.length>5?' y '+(parts.length-5)+' más':''):'Sin adjuntos';
+    const iframe=$(prefix+'Body');
+    iframe.srcdoc=buildEmailDocument(message||{},false,100,false);
+  };
+  const redraw=()=>{
+    if(!pendingSimilarity)return;
+    const item=matches[Number(choice.value)]||matches[0];
+    if(!item)return;
+    const oldMessages=getThread(item.row);
+    const oldMessage=item.anchor||oldMessages[oldMessages.length-1]||item.row;
+    fillMail('threadExisting',oldMessage,item.row.subject);
+    fillMail('threadIncoming',mail,mail.subject);
+    $('threadExistingCount').textContent=oldMessages.length+' mensaje'+
+      (oldMessages.length===1?'':'s')+' en esta RFQ';
+    $('threadMatchScore').textContent=item.explicit?
+      'Respuesta enlazada por cabeceras':
+      'Coincidencia orientativa: '+item.score+'/100';
+    const reasons=$('threadCompareReasons');
+    reasons.replaceChildren();
+    for(const reason of item.reasons){
+      const label=document.createElement('span');
+      label.className='thread-compare-reason';
+      label.textContent='✓ '+reason;
+      reasons.append(label);
+    }
+    $('acceptThreadMatch').disabled=!cards.some(c=>c.id===item.row.id);
+  };
+  choice.onchange=redraw;
+  $('acceptThreadMatch').onclick=()=>{
+    const selected=matches[Number(choice.value)]||matches[0];
+    resolveSimilarity('link',selected.row.id);
+  };
+  $('rejectThreadMatch').onclick=()=>resolveSimilarity('separate');
+  $('discardThreadMatch').onclick=()=>resolveSimilarity('discard');
+  // makeModal ya añade un listener de cierre; resolver también el estado
+  // pendiente para que la cola de importación siga procesándose.
+  root.querySelector('[data-close]').onclick=()=>resolveSimilarity('discard');
+  redraw();
 }
-async function resolveSimilarity(accept,targetId=null){
+async function resolveSimilarity(action,targetId=null){
   const mail=pendingSimilarity;
+  if(!mail)return;
   pendingSimilarity=null;
   closeModal();
   try{
-    if(mail&&targetId)await appendMailToThread(targetId,mail);
-    else if(accept&&mail)await addMail(mail);
-  }finally{processQueue();}
+    if(action==='link'&&targetId)await appendMailToThread(targetId,mail);
+    else if(action==='separate')await addMail(mail);
+    // 'discard' no crea nada ni almacena adjuntos.
+  }catch(error){
+    toast('No se pudo completar la decisión sobre el hilo: '+error.message,'error');
+  }finally{
+    void processQueue();
+  }
 }
 async function processQueue(){
   if(isBusy||pendingSimilarity)return;
