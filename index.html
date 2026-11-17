@@ -220,6 +220,11 @@ function similarity(mail, row) {
   if (!bodyA || !bodyB) return Math.round(.85*subj+.15*sender);
   return Math.round(.30*subj+.60*ratio(bodyA, bodyB)+.10*sender);
 }
+function attachmentManifest(message){
+  return (Array.isArray(message.attachments)?message.attachments:[])
+    .map(file=>String(file.name||'').toLowerCase()+':'+String(file.size||0))
+    .sort().join('|');
+}
 function duplicateReason(mail,row){
   const entries=[row,...(Array.isArray(row.thread)?row.thread:[])];
   for(const entry of entries){
@@ -227,7 +232,13 @@ function duplicateReason(mail,row){
       normalizeMessageId(mail.message_id)===normalizeMessageId(entry.message_id))return 'Message-ID idéntico';
     if(mail.raw_sha256 && entry.raw_sha256 && mail.raw_sha256===entry.raw_sha256)return 'Archivo idéntico';
     if(mail.email_fingerprint && entry.email_fingerprint &&
-      mail.email_fingerprint===entry.email_fingerprint)return 'Remitente, asunto y contenido idénticos';
+      mail.email_fingerprint===entry.email_fingerprint){
+      const incoming=attachmentManifest(mail),existing=attachmentManifest(entry);
+      // Dos mensajes de igual texto pero con archivos distintos no son duplicados exactos.
+      // Una importación antigua sin adjuntos sí se deja actualizar con el nuevo original.
+      if(incoming&&existing&&incoming!==existing)continue;
+      return 'Remitente, asunto y contenido idénticos';
+    }
   }
   return null;
 }
