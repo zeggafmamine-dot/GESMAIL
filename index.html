@@ -116,7 +116,105 @@ let activeId=null;
 let queue=[];
 let pendingSimilarity=null;
 let isBusy=false;
-let owner=localStorage.getItem(USER_KEY)||'Usuario demo';
+let owner=localStorage.getItem(USER_KEY)||'';
+const TEAM_KEY='rfq-equipo-team-local-v1';
+
+let teamMembers=loadTeamMembers();
+
+function loadTeamMembers(){
+  try {
+    const data=JSON.parse(localStorage.getItem(TEAM_KEY)||'[]');
+    return Array.isArray(data) ? [...new Set(data.map(v=>String(v||'').trim()).filter(Boolean))].slice(0,40) : [];
+  }catch{return []}
+}
+
+function teamOptions(selected=''){
+  const names=[...teamMembers];
+  if(selected && !names.includes(selected))names.push(selected);
+  return `<option value="">Sin asignar</option>`+names.map(n=>`<option value="${esc(n)}" ${n===selected?'selected':''}>${esc(n)}</option>`).join('');
+}
+
+function manageTeam(){
+  const current=owner;
+  const body=`<div class="team-helper">Esta versión es una demo local. Puedes configurar los miembros del equipo y elegir un usuario para filtrar «Mis solicitudes», pero todavía no hay cuentas ni permisos reales.</div>
+    <form id="teamForm" class="form-grid">
+      <label class="wide">Miembros del equipo (uno por línea)
+        <textarea name="members" rows="6" placeholder="Nombre Apellido&#10;Otra persona">${esc(teamMembers.join('\n'))}</textarea>
+      </label>
+      <label class="wide">Usuario activo en este navegador
+        <select name="current_owner">${teamOptions(current)}</select>
+      </label>
+    </form>`;
+  makeModal('Usuarios del equipo','Lista editable para asignar propietarios de las RFQ.',body,
+    '<button class="secondary" data-close>Cancelar</button><button class="primary" id="saveTeamBtn">Guardar equipo</button>','EQUIPO');
+  const textarea=$('teamForm').elements.members;
+  textarea.addEventListener('input',()=>{
+    const saved=$('teamForm').elements.current_owner.value;
+    const members=[...new Set(textarea.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))].slice(0,40);
+    const select=$('teamForm').elements.current_owner;
+    select.innerHTML= `<option value="">Sin seleccionar</option>`+
+      members.map(n=>`<option value="${esc(n)}" ${n===saved?'selected':''}>${esc(n)}</option>`).join('');
+  });
+  $('saveTeamBtn').onclick=()=>{
+    const members=[...new Set(textarea.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))].slice(0,40);
+    const selected=$('teamForm').elements.current_owner.value;
+    try {
+      localStorage.setItem(TEAM_KEY,JSON.stringify(members));
+      localStorage.setItem(USER_KEY,members.includes(selected)?selected:'');
+      teamMembers=members;
+      owner=members.includes(selected)?selected:'';
+    }catch{toast('No se pudieron guardar los usuarios del equipo.','error');return}
+    closeModal();render();toast('Equipo actualizado.','success');
+  };
+}
+
+function getThread(card){
+  if(Array.isArray(card.thread) && card.thread.length)return card.thread;
+  // Mantener visibles los correos de RFQ ya guardadas antes de esta versión.
+  if(!card.sender && !card.body_preview && !card.message_id)return [];
+  return [{message_id:card.message_id||null,subject:card.subject||'',
+    sender:card.sender||'',to:card.to||'',cc:card.cc||'',
+    email_date:card.email_date||card.created_at||null,
+    body_preview:card.body_preview||'', original_filename:card.original_filename||'',
+    raw_sha256:card.raw_sha256||null,email_fingerprint:card.email_fingerprint||null,
+    normalized_subject:card.normalized_subject||'',
+    normalized_body:card.normalized_body||''}];
+}
+
+function newThreadEntry(mail){
+  return {message_id:mail.message_id||null,subject:mail.subject||'',
+    sender:mail.sender||'',to:mail.to||'',cc:mail.cc||'',
+    in_reply_to:mail.in_reply_to||null,references:mail.references||[],
+    email_date:mail.email_date||null,imported_at:createdAt(),
+    body_preview:mail.body_preview||'',original_filename:mail.original_filename||'',
+    raw_sha256:mail.raw_sha256||null,email_fingerprint:mail.email_fingerprint||null,
+    normalized_subject:mail.normalized_subject||'',normalized_body:mail.normalized_body||''};
+}
+
+function findThreadByReply(mail){
+  const refs=[mail.in_reply_to,...(mail.references||[])].filter(Boolean).map(normalizeMessageId);
+  if(!refs.length)return null;
+  return cards.find(c=>getThread(c).some(m=>m.message_id&&refs.includes(normalizeMessageId(m.message_id))))||null;
+}
+
+function appendMailToThread(id,mail){
+  const row=cards.find(c=>c.id===id);
+  if(!row)return false;
+  if(duplicateReason(mail,row)){
+    toast('Este mensaje ya está en el hilo y no se ha añadido de nuevo.','warning');
+    return false;
+  }
+  const now=createdAt();
+  const next=cards.map(c=>{
+    if(c.id!==id)return c;
+    const updated={...c,thread:[...getThread(c),newThreadEntry(mail)].slice(-150),
+      updated_at:now};
+    appendHistory(updated,`Correo añadido al hilo: ${mail.subject}`);
+    return updated;
+  });
+  if(persist(next)){toast('Correo añadido al hilo de la RFQ.','success');return true}
+  return false;
+}
 
 function loadCards(){
   try { const x=JSON.parse(localStorage.getItem(KEY)||'[]'); return Array.isArray(x)?x.filter(c=>c&&c.id&&STAGES.includes(c.stage)).slice(0,2000):[]; }
