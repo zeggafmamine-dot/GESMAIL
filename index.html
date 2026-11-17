@@ -225,6 +225,17 @@ function attachmentManifest(message){
     .map(file=>String(file.name||'').toLowerCase()+':'+String(file.size||0))
     .sort().join('|');
 }
+function attachmentsHaveDifferentContent(mail,entry){
+  const mine=(mail.attachments||[]),theirs=(entry.attachments||[]);
+  if(!mine.length||!theirs.length)return false;
+  if(attachmentManifest(mail)!==attachmentManifest(entry))return true;
+  const modern=files=>files.every(f=>String(f.id||'').startsWith('gesmail-att-content-'));
+  if(modern(mine)&&modern(theirs)){
+    const ordered=files=>files.map(f=>String(f.id)).sort().join('|');
+    return ordered(mine)!==ordered(theirs);
+  }
+  return false;
+}
 function duplicateReason(mail,row){
   const entries=[row,...(Array.isArray(row.thread)?row.thread:[])];
   for(const entry of entries){
@@ -236,7 +247,7 @@ function duplicateReason(mail,row){
       const incoming=attachmentManifest(mail),existing=attachmentManifest(entry);
       // Dos mensajes de igual texto pero con archivos distintos no son duplicados exactos.
       // Una importación antigua sin adjuntos sí se deja actualizar con el nuevo original.
-      if(incoming&&existing&&incoming!==existing)continue;
+      if(incoming&&existing&&attachmentsHaveDifferentContent(mail,entry))continue;
       return 'Remitente, asunto y contenido idénticos';
     }
   }
@@ -415,7 +426,7 @@ async function saveMailAttachments(mail){
   delete mail._attachmentPayloads;
   if(failed)toast('No se pudieron almacenar '+failed+' adjunto(s) en este navegador.','warning');
 }
-function attachmentMetadataFromMail(parts,html,fingerprint){
+async function attachmentMetadataFromMail(parts,html,fingerprint){
   const attachments=[],payloads=[];
   let remaining=MAX_STORED_MAIL_ATTACHMENTS;
   for(const [index,part] of (parts||[]).entries()){
@@ -428,7 +439,11 @@ function attachmentMetadataFromMail(parts,html,fingerprint){
     const approximate=typeof content==='string'?Math.max(0,Math.floor(content.replace(/=+$/,'').length*3/4)):
       content?.byteLength||content?.length||0;
     const bytes=Number(part.size)||approximate;
-    const id='gesmail-att-'+fingerprint+'-'+index;
+    // Identificador por contenido: dos correos con el mismo texto pero PDFs
+    // distintos no pueden sobreescribirse en IndexedDB.
+    const hashInput=bytes>0&&bytes<=MAX_STORED_ATTACHMENT&&content?
+      content:fingerprint+'|'+index+'|'+String(part.filename||'')+'|'+bytes;
+    const id='gesmail-att-content-'+await sha256(hashInput);
     attachments.push({id,name:String(part.filename||'Adjunto '+(index+1)).slice(0,200),
       mime,size:bytes,stored:false});
     if(bytes>0&&bytes<=MAX_STORED_ATTACHMENT&&bytes<=remaining){
@@ -1327,7 +1342,7 @@ async function parsedMailWithHtml(buf,file){
   const fingerprint=[normalizeSender(sender),normalized_subject,normalized_body];
   if(!normalized_body)fingerprint.push(mail.date||'');
   const fingerprintHash=await sha256(fingerprint.join('\n'));
-  const fileParts=attachmentMetadataFromMail(mail.attachments,body_html,fingerprintHash);
+  const fileParts=await attachmentMetadataFromMail(mail.attachments,body_html,fingerprintHash);
   return {subject,sender,to,cc,body_preview:fullText.slice(0,14000),body_html,
     inline_images:imageResult.images,attachments:fileParts.attachments,_attachmentPayloads:fileParts.payloads,
     email_date:mail.date||getHeader('date')||null,message_id:msgId,in_reply_to,references,
