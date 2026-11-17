@@ -11,6 +11,7 @@ Demo web del tablero de solicitudes de oferta (RFQ) del departamento comercial.
 - **Hilo de correos** dentro de cada ficha: mensajes con fecha, remitente, To, CC y vista previa del cuerpo. Las respuestas que contienen `In-Reply-To` o `References` se enlazan automáticamente mediante `Message-ID` a un mensaje ya importado. En avisos de similitud también se ofrece **Añadir al hilo** manualmente.
 - **Usuarios del equipo** configurables desde el menú lateral, guardados **sólo en ese navegador** (no hay todavía registro, autenticación ni permisos reales).
 - Creación manual, edición y cambio de estado de RFQ.
+- **Borrar negocio:** abre una RFQ y selecciona **Borrar negocio** en la esquina inferior izquierda. Se solicita confirmación y sólo se elimina esa RFQ, junto con sus mensajes asociados, notas e historial. Es irreversible; exporta una copia JSON antes si deseas conservarla.
 - Búsqueda, exportación y restauración de copias JSON.
 - Botón **Cargar ejemplos** con correos ficticios para pruebas.
 
