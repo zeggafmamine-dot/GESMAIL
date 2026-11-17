@@ -283,16 +283,18 @@ function render(){
   const counts=Object.fromEntries(STAGES.map(s=>[s,cards.filter(c=>c.stage===s).length]));
   $('requestCount').textContent=counts['Petición'];$('sentCount').textContent=counts['Oferta enviada'];$('wonCount').textContent=counts['Pedido ganado'];
   const q=$('searchInput').value.trim().toLocaleLowerCase();
-  const visible=cards.filter(c=>(mode!=='mine'||c.owner_name===owner) && (!q||[c.subject,c.sender,c.client,c.owner_name,c.offer_reference,c.notes].some(v=>String(v||'').toLocaleLowerCase().includes(q))));
+  const visible=cards.filter(c=>(mode!=='mine'||(owner&&c.owner_name===owner)) && (!q||[c.subject,c.sender,c.cc,c.client,c.owner_name,c.offer_reference,c.notes,...getThread(c).flatMap(m=>[m.sender,m.cc,m.subject])].some(v=>String(v||'').toLocaleLowerCase().includes(q))));
   $('boardTotal').textContent=`${visible.length} solicitudes`;
   $('boardHeading').textContent=mode==='mine'?'Mis solicitudes':'Pipeline de RFQ';
+  $('currentUserName').textContent=owner||'Sin usuario seleccionado';
+  $('currentUserAvatar').textContent=(owner||'?').slice(0,1).toUpperCase();
   $('viewAll').classList.toggle('active',mode==='all');$('viewMine').classList.toggle('active',mode==='mine');
   $('board').innerHTML=STAGES.map(stage=>{
     const subset=visible.filter(c=>c.stage===stage).sort((a,b)=>String(b.updated_at||b.created_at).localeCompare(String(a.updated_at||a.created_at)));
     return `<section class="column ${typeClass[stage]}" data-stage="${esc(stage)}"><div class="col-head"><div class="col-label"><span class="col-dot"></span>${esc(stage)}</div><span class="col-count">${subset.length}</span></div><div class="cards">${subset.map(c=>`
       <article class="rfq-card" role="button" tabindex="0" data-id="${esc(c.id)}" draggable="true" aria-label="Abrir ${esc(c.subject)}">
         <div class="card-top"><span class="card-tag">▤ RFQ</span><span class="card-date">◷ ${esc(dateShort(c.created_at))}</span></div>
-        <h3>${esc(c.subject)}</h3><div class="client">${esc(c.client||c.sender||'Sin cliente')}</div>
+        <h3>${esc(c.subject)}</h3><div class="client">${esc(c.client||'Empresa no indicada')}</div>
         <div class="card-foot"><span class="owner"><span class="owner-avatar">${esc((c.owner_name||'?').slice(0,1).toUpperCase())}</span><em>${esc(c.owner_name||'Sin asignar')}</em></span>${c.priority&&c.priority!=='Normal'?`<span class="priority ${esc(c.priority)}">${esc(c.priority)}</span>`:''}</div>
         ${c.offer_reference?`<span class="ref">${esc(c.offer_reference)}</span>`:''}
       </article>`).join('')||'<div class="empty"><b>▤</b><span>Sin solicitudes</span><small>Arrastra una tarjeta aquí</small></div>'}</div></section>`;
@@ -318,41 +320,79 @@ function makeModal(title,subtitle,body,actions,eyebrow='DETALLE DE RFQ'){
   const first=overlay.querySelector('input,select,button');first?.focus();
 }
 function openCard(id){
-  const c=cards.find(x=>x.id===id);if(!c)return;activeId=id;
-  const opts=(values,current)=>values.map(v=>`<option ${v===current?'selected':''}>${esc(v)}</option>`).join('');
-  const body=`<form id="cardForm" class="form-grid">
-    <label>Cliente<input name="client" maxlength="120" value="${esc(c.client||'')}" placeholder="Empresa o cliente"></label>
-    <label>Responsable<input name="owner_name" maxlength="100" value="${esc(c.owner_name||'')}" placeholder="Comercial responsable"></label>
+  const c=cards.find(x=>x.id===id);
+  if(!c)return;
+  activeId=id;
+  const opts=(values,current)=>values.map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}</option>`).join('');
+  const thread=getThread(c).slice().sort((a,b)=>{
+    const av=new Date(a.email_date||a.imported_at||0).getTime();
+    const bv=new Date(b.email_date||b.imported_at||0).getTime();
+    return (Number.isFinite(av)?av:0)-(Number.isFinite(bv)?bv:0);
+  });
+  const threadMarkup=thread.length?thread.map((m,i)=>`
+    <details class="thread-email" ${i===thread.length-1?'open':''}>
+      <summary><span class="thread-num">${i+1}</span><span class="thread-line"><strong>${esc(m.subject||c.subject||'Sin asunto')}</strong><small>${esc(m.sender||'Remitente no disponible')} · ${esc(longDate(m.email_date||m.imported_at))}</small></span></summary>
+      <div class="thread-email-details">
+        <div><strong>De:</strong> ${esc(m.sender||'No disponible')}</div>
+        <div><strong>Para:</strong> ${esc(m.to||'No consta')}</div>
+        <div><strong>CC:</strong> ${esc(m.cc||'Sin personas en copia')}</div>
+        <div><strong>Fecha:</strong> ${esc(longDate(m.email_date||m.imported_at))}</div>
+        ${m.body_preview?`<pre class="thread-mail-body">${esc(m.body_preview)}</pre>`:'<p class="thread-empty">El cuerpo de este mensaje no está disponible.</p>'}
+      </div>
+    </details>`).join(''):'<p class="thread-empty">Esta RFQ se creó sin correo. Importa un mensaje relacionado para añadirlo al hilo.</p>';
+  const body=`<div class="rfq-summary">
+    <div class="rfq-summary-field"><small>Asunto del correo · automático</small><strong>${esc(c.subject||'Sin asunto')}</strong></div>
+    <div class="rfq-summary-field"><small>Remitente · automático</small><strong>${esc(c.sender||'Sin correo asociado')}</strong></div>
+    <div class="rfq-summary-field"><small>Personas en copia (CC) · automático</small><strong>${esc(c.cc||'Sin personas en copia')}</strong></div>
+  </div>
+  <form id="cardForm" class="form-grid">
+    <label>Empresa · manual<input name="client" maxlength="120" value="${esc(c.client||'')}" placeholder="Indica la empresa"></label>
+    <label>Propietario de la RFQ · manual<select name="owner_name">${teamOptions(c.owner_name||'')}</select></label>
     <label>Estado<select name="stage">${opts(STAGES,c.stage)}</select></label>
     <label>Prioridad<select name="priority">${opts(['Baja','Normal','Alta','Urgente'],c.priority||'Normal')}</select></label>
-    <label class="wide">Referencia de oferta<input name="offer_reference" maxlength="100" value="${esc(c.offer_reference||'')}" placeholder="Ej.: 161126_MAZ03"></label>
-    <label class="wide">Notas del equipo<textarea name="notes" rows="4" maxlength="10000" placeholder="Seguimiento y decisiones...">${esc(c.notes||'')}</textarea></label>
-  </form><div class="info" style="margin-top:14px">${esc(c.original_filename||'RFQ creada manualmente')} · Registrada el ${esc(longDate(c.created_at))}</div>
-  ${c.body_preview?`<details class="body-preview"><summary>Vista previa del correo</summary><pre>${esc(c.body_preview)}</pre></details>`:''}
-  <div class="history"><b>Historial</b><ul>${(c.history||[]).slice().reverse().map(h=>`<li>${esc(h.event)} · ${esc(longDate(h.at))}</li>`).join('')}</ul></div>`;
-  makeModal(c.subject,c.sender||'RFQ creada manualmente',body,'<button class="secondary" data-close>Cancelar</button><button id="saveCardBtn" class="primary">Guardar cambios</button>');
+    <label class="wide">Referencia de oferta<input name="offer_reference" maxlength="100" value="${esc(c.offer_reference||'')}" placeholder="Ej.: 171126_MAZ05"></label>
+    <label class="wide">Notas y seguimiento<textarea name="notes" rows="3" maxlength="10000" placeholder="Decisiones, acciones pendientes...">${esc(c.notes||'')}</textarea></label>
+  </form>
+  <section class="mail-thread"><h3>Hilo de correos <span>${thread.length} ${thread.length===1?'mensaje':'mensajes'}</span></h3>
+    <p class="thread-hint">Los mensajes se vinculan mediante las referencias de respuesta del correo. Si no existen, podrás asociarlos desde la detección de similitud.</p>
+    ${threadMarkup}
+  </section>
+  <div class="info" style="margin-top:14px">${esc(c.original_filename||'RFQ creada manualmente')} · Registrada el ${esc(longDate(c.created_at))}</div>
+  <div class="history"><b>Historial de la RFQ</b><ul>${(c.history||[]).slice().reverse().map(h=>`<li>${esc(h.event)} · ${esc(longDate(h.at))}</li>`).join('')}</ul></div>`;
+  makeModal(c.subject,c.client||'Ficha de solicitud de oferta',body,'<button class="secondary" data-close>Cancelar</button><button id="saveCardBtn" class="primary">Guardar cambios</button>');
   $('saveCardBtn').onclick=()=>{
     const data=Object.fromEntries(new FormData($('cardForm')));
     if(!STAGES.includes(data.stage))return toast('Estado no válido','error');
-    const next=cards.map(old=>{if(old.id!==id)return old;const x={...old,...data,updated_at:createdAt()};appendHistory(x,old.stage!==data.stage?`Estado: ${old.stage} → ${data.stage}`:'Datos actualizados');return x});
+    if(data.owner_name&&!teamMembers.includes(data.owner_name)&&data.owner_name!==(c.owner_name||''))return toast('Selecciona un propietario del equipo.','error');
+    const next=cards.map(old=>{
+      if(old.id!==id)return old;
+      const x={...old,...data,updated_at:createdAt()};
+      appendHistory(x,old.stage!==data.stage?`Estado: ${old.stage} → ${data.stage}`:'Datos de la RFQ actualizados');
+      return x;
+    });
     if(persist(next)){closeModal();toast('RFQ actualizada','success')}
   };
 }
 function newCard(){
   const body=`<form id="newForm" class="form-grid">
     <label class="wide">Asunto de la solicitud<input name="subject" maxlength="220" required placeholder="Ej.: Transformador 25 kVA, 400/230 V"></label>
-    <label>Cliente<input name="client" maxlength="120" placeholder="Nombre de la empresa"></label>
-    <label>Responsable<input name="owner_name" maxlength="100" value="${esc(owner)}"></label>
+    <label>Remitente (si no hay correo)<input name="sender" maxlength="250" placeholder="Nombre y email"></label>
+    <label>CC (si no hay correo)<input name="cc" maxlength="500" placeholder="Correos en copia"></label>
+    <label>Empresa · manual<input name="client" maxlength="120" placeholder="Empresa del cliente"></label>
+    <label>Propietario · manual<select name="owner_name">${teamOptions('')}</select></label>
     <label>Estado<select name="stage"><option>Petición</option>${STAGES.slice(1).map(s=>`<option>${esc(s)}</option>`).join('')}</select></label>
     <label>Prioridad<select name="priority"><option>Normal</option><option>Alta</option><option>Urgente</option><option>Baja</option></select></label>
     <label class="wide">Referencia de oferta<input name="offer_reference" maxlength="100" placeholder="Opcional"></label>
     <label class="wide">Notas<textarea name="notes" rows="3" maxlength="10000"></textarea></label>
   </form>`;
-  makeModal('Crear RFQ manual','También puedes registrar una petición sin archivo de correo.',body,'<button class="secondary" data-close>Cancelar</button><button class="primary" id="createManual">Crear RFQ</button>','NUEVA RFQ');
+  makeModal('Crear RFQ manual','Los correos importados rellenan el remitente, el asunto y CC automáticamente.',body,'<button class="secondary" data-close>Cancelar</button><button class="primary" id="createManual">Crear RFQ</button>','NUEVA RFQ');
   $('createManual').onclick=()=>{
     if(!$('newForm').reportValidity())return;
     const form=Object.fromEntries(new FormData($('newForm')));
-    const now=createdAt();const c={...form,id:uuid(),sender:'',original_filename:'',body_preview:'',created_at:now,updated_at:now,history:[{at:now,event:'RFQ creada manualmente'}]};
+    if(!STAGES.includes(form.stage))return toast('Estado no válido','error');
+    const now=createdAt();
+    const c={...form,id:uuid(),original_filename:'',body_preview:'',thread:[],
+      created_at:now,updated_at:now,history:[{at:now,event:'RFQ creada manualmente'}]};
     if(persist([c,...cards])){closeModal();toast('RFQ creada','success')}
   };
 }
@@ -466,6 +506,7 @@ async function loadExamples(){
 $('searchInput').addEventListener('input',render);
 $('viewAll').onclick=()=>{mode='all';render()};$('viewMine').onclick=()=>{mode='mine';render()};
 $('newBtn').onclick=newCard;
+$('teamBtn').onclick=manageTeam;
 $('chooseBtn').onclick=()=>$('mailInput').click();
 $('mailInput').addEventListener('change',e=>{addFiles(e.target.files);e.target.value=''});
 $('loadExamples').onclick=loadExamples;
@@ -490,13 +531,14 @@ render();
       <button class="nav" id="viewMine"><span>◉</span> Mis solicitudes</button>
     </div>
     <div class="nav-group"><small>HERRAMIENTAS</small>
+      <button class="nav" id="teamBtn"><span>♧</span> Usuarios del equipo</button>
       <button class="nav" id="loadExamples"><span>✦</span> Cargar ejemplos</button>
       <button class="nav" id="backupBtn"><span>⇩</span> Exportar datos</button>
       <button class="nav" id="restoreBtn"><span>⇧</span> Importar copia</button>
       <input id="restoreInput" type="file" accept="application/json,.json" hidden>
     </div>
     <div class="sidebar-spacer"></div>
-    <div class="user-panel"><span class="user-avatar">D</span><div><strong>Usuario de prueba</strong><small>Los datos están en este navegador</small></div></div>
+    <div class="user-panel"><span class="user-avatar" id="currentUserAvatar">?</span><div><strong id="currentUserName">Sin usuario seleccionado</strong><small>Usuario local · sin inicio de sesión</small></div></div>
   </aside>
   <main class="main">
     <div class="demo-bar"><span class="status-dot"></span><b>MODO DEMOSTRACIÓN</b><span>Sin Supabase · Sin servidor · Sin sincronización entre usuarios</span><span class="demo-tag">GitHub Pages</span></div>
